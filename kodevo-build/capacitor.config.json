@@ -1,8 +1,0 @@
-{
-  "appId": "com.kodevo.app",
-  "appName": "Kodevo",
-  "webDir": "dist",
-  "server": {
-    "androidScheme": "https"
-  }
-}
