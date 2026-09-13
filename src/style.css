@@ -45,7 +45,7 @@ button {
   background: #0f1117;
 }
 
-/* Sidebar */
+/* SIDEBAR */
 
 .sidebar {
   width: 250px;
@@ -78,18 +78,38 @@ button {
   font-weight: 800;
 }
 
+/* CONNECTOR */
+
+.connector-button,
 .new-project {
   width: 100%;
   height: 44px;
   border: 1px solid #343842;
   border-radius: 10px;
-  background: #20232c;
-  color: #f1f3f4;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 0 14px;
   text-align: left;
+}
+
+.connector-button {
+  margin-bottom: 8px;
+  background: #1a1d24;
+  color: #d9dce2;
+}
+
+.connector-button:hover {
+  background: #252932;
+}
+
+.plug {
+  font-size: 19px;
+}
+
+.new-project {
+  background: #20232c;
+  color: #f1f3f4;
 }
 
 .new-project:hover {
@@ -151,7 +171,7 @@ button {
   color: white;
 }
 
-/* Main */
+/* MAIN */
 
 .main {
   flex: 1;
@@ -179,9 +199,10 @@ button {
 .top-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
+.stage-badge,
 .provider-badge {
   max-width: 260px;
   overflow: hidden;
@@ -192,6 +213,11 @@ button {
   border-radius: 8px;
   color: #aeb4bf;
   font-size: 12px;
+}
+
+.stage-badge {
+  color: #d1d5dc;
+  background: #191c23;
 }
 
 .settings-button {
@@ -207,7 +233,7 @@ button {
   color: white;
 }
 
-/* Workspace */
+/* WORKSPACE */
 
 .workspace {
   flex: 1;
@@ -216,7 +242,7 @@ button {
 }
 
 .welcome {
-  width: min(760px, 90%);
+  width: min(800px, 90%);
   margin: auto;
   padding: 70px 0 30px;
   text-align: center;
@@ -244,7 +270,7 @@ button {
 
 .welcome p {
   margin: 0 auto;
-  max-width: 520px;
+  max-width: 600px;
   color: #9298a5;
   line-height: 1.6;
 }
@@ -270,10 +296,10 @@ button {
   color: white;
 }
 
-/* Conversation */
+/* CONVERSATION */
 
 .conversation {
-  width: min(850px, 90%);
+  width: min(900px, 90%);
   margin: 0 auto;
   padding: 35px 0;
 }
@@ -301,10 +327,110 @@ button {
   background: #20232b;
 }
 
-/* Composer */
+/* AGENT WORKING */
+
+.agent-working {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin: 25px 0;
+  padding: 14px 16px;
+  border: 1px solid #292d36;
+  border-radius: 12px;
+  background: #15181f;
+}
+
+.agent-working strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+.agent-working span {
+  display: block;
+  color: #777f8d;
+  font-size: 12px;
+}
+
+.agent-spinner {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: 2px solid #343943;
+  border-top-color: #e8eaed;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* FILES */
+
+.file-section {
+  margin: 30px 0;
+}
+
+.file-section-title {
+  margin-bottom: 10px;
+  color: #888f9d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.file-card {
+  width: 100%;
+  min-height: 48px;
+  margin-bottom: 7px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border: 1px solid #2d313b;
+  border-radius: 10px;
+  background: #171a21;
+  color: #dce0e6;
+  text-align: left;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    transform 0.15s;
+}
+
+.file-card:hover {
+  background: #20242c;
+  border-color: #444955;
+  transform: translateY(-1px);
+}
+
+.file-status {
+  width: 20px;
+  color: #aeb4bf;
+  text-align: center;
+}
+
+.file-name {
+  flex: 1;
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 13px;
+}
+
+.file-arrow {
+  color: #777e8b;
+  font-size: 20px;
+}
+
+/* COMPOSER */
 
 .composer-area {
-  width: min(850px, 92%);
+  width: min(900px, 92%);
   margin: 0 auto;
   padding: 12px 0 18px;
 }
@@ -381,7 +507,7 @@ button {
   font-size: 11px;
 }
 
-/* Settings */
+/* SETTINGS */
 
 .settings-panel {
   width: 320px;
@@ -390,6 +516,7 @@ button {
   background: #15171e;
   border-left: 1px solid #292c35;
   overflow-y: auto;
+  z-index: 20;
 }
 
 .settings-header {
@@ -430,11 +557,6 @@ button {
   color: #e7e9ed;
 }
 
-.settings-panel input:focus,
-.settings-panel select:focus {
-  border-color: #606674;
-}
-
 .save-button {
   width: 100%;
   height: 42px;
@@ -453,28 +575,220 @@ button {
   line-height: 1.5;
 }
 
-/* Tablet */
+/* CONNECTOR PAGE */
 
-@media (max-width: 800px) {
+.connector-page {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  background: #0f1117;
+  padding: 40px;
+}
+
+.connector-header {
+  width: min(1000px, 100%);
+  margin: 0 auto 35px;
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.connector-header h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
+.connector-header p {
+  margin: 0;
+  color: #858c99;
+}
+
+.back-button {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 1px solid #30343d;
+  border-radius: 10px;
+  background: #191c23;
+  color: #dfe2e7;
+  font-size: 20px;
+}
+
+.back-button:hover {
+  background: #252932;
+}
+
+.connector-grid {
+  width: min(1000px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(290px, 1fr)
+  );
+  gap: 14px;
+}
+
+.connector-card {
+  min-height: 150px;
+  padding: 20px;
+  border: 1px solid #2b2f38;
+  border-radius: 14px;
+  background: #15181f;
+  display: flex;
+  flex-direction: column;
+}
+
+.connector-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  border: 1px solid #30343e;
+  border-radius: 10px;
+  background: #1c1f27;
+  color: #e2e5e9;
+  font-size: 18px;
+}
+
+.connector-info {
+  flex: 1;
+}
+
+.connector-info h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.connector-info p {
+  margin: 0;
+  color: #858c99;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.connector-connect {
+  width: 100%;
+  height: 38px;
+  margin-top: 18px;
+  border: 1px solid #3b404b;
+  border-radius: 9px;
+  background: #20232b;
+  color: #dce0e5;
+}
+
+.connector-connect:hover {
+  background: #292d36;
+}
+
+.connector-connect.connected {
+  background: #e8eaed;
+  color: #111318;
+  border-color: #e8eaed;
+}
+
+.connector-connect.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* FILE PAGE */
+
+.file-page {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #0f1117;
+}
+
+.file-header {
+  height: 62px;
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  border-bottom: 1px solid #292c35;
+}
+
+.file-title {
+  flex: 1;
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+  font-size: 14px;
+}
+
+.file-tabs {
+  display: flex;
+  gap: 5px;
+}
+
+.file-tabs button {
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #858c99;
+}
+
+.file-tabs button:hover,
+.file-tabs button.active {
+  background: #242832;
+  color: #e8eaed;
+}
+
+.file-viewer {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.code-view {
+  min-height: 100%;
+  margin: 0;
+  padding: 25px;
+  background: #0d0f14;
+  color: #d9dde4;
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.preview-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 500px;
+  border: 0;
+  background: white;
+}
+
+/* RESPONSIVE */
+
+@media (max-width: 900px) {
   .sidebar {
-    width: 210px;
+    width: 220px;
   }
 
-  .settings-panel {
-    position: absolute;
-    right: 0;
-    top: 0;
-    width: 320px;
-    z-index: 10;
-    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.35);
+  .provider-badge {
+    display: none;
   }
 
-  .welcome {
-    padding-top: 45px;
+  .connector-page {
+    padding: 25px;
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 650px) {
   .sidebar {
     display: none;
   }
@@ -483,19 +797,34 @@ button {
     padding: 0 14px;
   }
 
-  .provider-badge {
+  .stage-badge {
     display: none;
+  }
+
+  .welcome {
+    padding-top: 45px;
   }
 
   .welcome h1 {
     font-size: 25px;
   }
 
+  .conversation,
   .composer-area {
     width: 94%;
   }
 
   .settings-panel {
+    position: absolute;
+    inset: 0;
     width: 100%;
+  }
+
+  .connector-page {
+    padding: 18px;
+  }
+
+  .connector-header h1 {
+    font-size: 24px;
   }
 }
