@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+Part 1
+
+import { useEffect, useMemo, useState } from "react";
 
 const DEFAULT_MODELS = {
   Groq: "llama-3.3-70b-versatile",
@@ -6,14 +8,37 @@ const DEFAULT_MODELS = {
   Gemini: "gemini-2.0-flash"
 };
 
+const INITIAL_PROJECT = {
+  name: "Untitled project",
+  stage: "understand",
+  requirements: [],
+  files: []
+};
+
 function App() {
   const [provider, setProvider] = useState("Groq");
   const [model, setModel] = useState(DEFAULT_MODELS.Groq);
   const [apiKey, setApiKey] = useState("");
+
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
+
+  const [project, setProject] = useState(INITIAL_PROJECT);
+
   const [showSettings, setShowSettings] = useState(false);
+  const [showConnectors, setShowConnectors] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileView, setFileView] = useState("code");
+
+  const [connectors, setConnectors] = useState({
+    GitHub: false,
+    Supabase: false,
+    Airtable: false,
+    Dropbox: false,
+    Vercel: false
+  });
 
   useEffect(() => {
     const saved = localStorage.getItem("kodevo-config");
@@ -23,13 +48,26 @@ function App() {
         const config = JSON.parse(saved);
 
         setProvider(config.provider || "Groq");
+
         setModel(
           config.model ||
             DEFAULT_MODELS[config.provider || "Groq"]
         );
+
         setApiKey(config.apiKey || "");
       } catch {
-        console.log("Could not load saved configuration.");
+        console.log("Could not load configuration.");
+      }
+    }
+
+    const savedConnectors =
+      localStorage.getItem("kodevo-connectors");
+
+    if (savedConnectors) {
+      try {
+        setConnectors(JSON.parse(savedConnectors));
+      } catch {
+        console.log("Could not load connectors.");
       }
     }
   }, []);
@@ -47,21 +85,193 @@ function App() {
     alert("Configuration saved.");
   };
 
-  const newProject = () => {
-    setMessages([]);
-    setMessage("");
+  const saveConnectors = (next) => {
+    setConnectors(next);
+
+    localStorage.setItem(
+      "kodevo-connectors",
+      JSON.stringify(next)
+    );
   };
 
-  const callAI = async (userMessage, previousMessages) => {
+  const newProject = () => {
+    setMessages([]);
+
+    setProject({
+      ...INITIAL_PROJECT,
+      name: "Untitled project"
+    });
+
+    setMessage("");
+    setSelectedFile(null);
+  };
+
+  const changeProvider = (event) => {
+    const nextProvider = event.target.value;
+
+    setProvider(nextProvider);
+
+    setModel(
+      DEFAULT_MODELS[nextProvider] || ""
+    );
+  };
+
+  const detectStage = (text) => {
+    const value = text.toLowerCase();
+
+    if (
+      value.includes("build") ||
+      value.includes("create") ||
+      value.includes("code") ||
+      value.includes("implement")
+    ) {
+      return "plan";
+    }
+
+    return "understand";
+  };
+
+  const extractFiles = (text) => {
+    const files = [];
+
+    const regex =
+      /(?:```|~~~)\s*(?:[a-zA-Z0-9+#.-]+)?\s*(?:\n)?([\s\S]*?)(?:```|~~~)/g;
+
+    let match;
+    let counter = 1;
+
+    while ((match = regex.exec(text)) !== null) {
+      const code = match[1].trim();
+
+      if (!code) continue;
+
+      let filename = `file-${counter}.txt`;
+
+      const lines = code.split("\n");
+
+      if (
+        lines[0].startsWith("// FILE:") ||
+        lines[0].startsWith("# FILE:") ||
+        lines[0].startsWith("/* FILE:")
+      ) {
+        filename = lines[0]
+          .replace("// FILE:", "")
+          .replace("# FILE:", "")
+          .replace("/* FILE:", "")
+          .replace("*/", "")
+          .trim();
+
+        lines.shift();
+      }
+
+      files.push({
+        id: `${Date.now()}-${counter}`,
+        name: filename,
+        content: lines.join("\n"),
+        status: "complete"
+      });
+
+      counter++;
+    }
+
+    return files;
+  };
+
+  const callAI = async (
+    userMessage,
+    previousMessages,
+    mode
+  ) => {
     if (!apiKey.trim()) {
-      throw new Error("Please enter your API key in Settings.");
+      throw new Error(
+        "Please enter your API key in Settings."
+      );
+    }
+
+    let systemPrompt = `
+You are Kodevo, an advanced AI software-building agent.
+
+You are NOT limited to HTML.
+
+You can work with:
+HTML, CSS, JavaScript, TypeScript, React, Next.js,
+Python, Java, C, C++, C#, PHP, Go, Rust, SQL,
+JSON, YAML, shell scripts and other programming languages.
+
+Your job is to understand the user's goal before coding.
+
+Do not immediately start coding when important requirements
+are missing.
+
+Ask useful questions naturally, one or a few at a time.
+
+Remember decisions made during the conversation.
+
+When enough information is known, create a clear implementation
+plan.
+
+When the user confirms the plan or clearly asks you to build,
+begin implementation.
+
+During implementation:
+- Explain what you are doing.
+- Break the work into logical stages.
+- Identify files being created or changed.
+- Respect the requested design.
+- Respect the requested programming language/framework.
+- Think about responsive design where appropriate.
+- Consider accessibility.
+- Consider errors and edge cases.
+- Do not claim that an external service was actually connected
+  unless a real tool has performed that action.
+
+When producing code files, use this format:
+
+// FILE: path/to/file.ext
+code here
+
+Place each file inside its own fenced code block.
+
+The filename must appear immediately after FILE:.
+
+Do not assume the project is a website.
+The project can be any type of software.
+`;
+
+    if (mode === "plan") {
+      systemPrompt += `
+The user is currently moving toward implementation.
+
+First understand whether requirements are sufficient.
+If they are not sufficient, ask the missing questions.
+
+If they are sufficient, produce:
+1. Understanding
+2. Plan
+3. Architecture
+4. Files that will be created
+5. Technologies
+6. Next implementation step
+
+Do not pretend that files have already been created.
+`;
+    }
+
+    if (mode === "build") {
+      systemPrompt += `
+The user is now asking you to build.
+
+Provide the implementation and actual source files.
+
+After each logical group of files, explain what has been
+completed and what you are doing next.
+`;
     }
 
     const conversation = [
       {
         role: "system",
-        content:
-          "You are Kodevo, an AI coding assistant. Help the user build websites, applications, and software. Give practical, accurate code and explanations."
+        content: systemPrompt
       },
       ...previousMessages
         .filter(
@@ -91,19 +301,24 @@ function App() {
           },
           body: JSON.stringify({
             contents: conversation
-              .filter((item) => item.role !== "system")
+              .filter(
+                (item) => item.role !== "system"
+              )
               .map((item) => ({
                 role:
                   item.role === "assistant"
                     ? "model"
                     : "user",
-                parts: [{ text: item.content }]
+                parts: [
+                  {
+                    text: item.content
+                  }
+                ]
               })),
             systemInstruction: {
               parts: [
                 {
-                  text:
-                    "You are Kodevo, an AI coding assistant. Help the user build websites, applications, and software."
+                  text: systemPrompt
                 }
               ]
             }
@@ -125,7 +340,7 @@ function App() {
         body: JSON.stringify({
           model,
           messages: conversation,
-          temperature: 0.7
+          temperature: 0.5
         })
       });
     }
@@ -158,7 +373,7 @@ function App() {
 
     if (!text || loading) return;
 
-    const userMessage = {
+    const userItem = {
       role: "user",
       content: text
     };
@@ -167,17 +382,44 @@ function App() {
 
     setMessages((current) => [
       ...current,
-      userMessage
+      userItem
     ]);
 
     setMessage("");
     setLoading(true);
 
+    const nextStage = detectStage(text);
+
+    if (nextStage === "plan") {
+      setProject((current) => ({
+        ...current,
+        stage: "plan"
+      }));
+    }
+
     try {
       const answer = await callAI(
         text,
-        previousMessages
+        previousMessages,
+        nextStage === "plan"
+          ? "plan"
+          : project.stage === "plan"
+          ? "build"
+          : "understand"
       );
+
+      const newFiles = extractFiles(answer);
+
+      if (newFiles.length > 0) {
+        setProject((current) => ({
+          ...current,
+          stage: "build",
+          files: [
+            ...current.files,
+            ...newFiles
+          ]
+        }));
+      }
 
       setMessages((current) => [
         ...current,
@@ -186,6 +428,15 @@ function App() {
           content: answer
         }
       ]);
+
+      if (
+        newFiles.length > 0
+      ) {
+        setProject((current) => ({
+          ...current,
+          stage: "build"
+        }));
+      }
     } catch (error) {
       setMessages((current) => [
         ...current,
@@ -199,14 +450,231 @@ function App() {
     }
   };
 
-  const handleProviderChange = (event) => {
-    const newProvider = event.target.value;
+  const projectStageText = useMemo(() => {
+    switch (project.stage) {
+      case "understand":
+        return "Understanding";
+      case "plan":
+        return "Planning";
+      case "build":
+        return "Building";
+      case "verify":
+        return "Verifying";
+      case "done":
+        return "Complete";
+      default:
+        return "Working";
+    }
+  }, [project.stage]);
 
-    setProvider(newProvider);
-    setModel(
-      DEFAULT_MODELS[newProvider] || ""
-    );
+  const toggleConnector = (name) => {
+    const next = {
+      ...connectors,
+      [name]: !connectors[name]
+    };
+
+    saveConnectors(next);
   };
+
+Part 2
+
+  if (showConnectors) {
+    return (
+      <div className="connector-page">
+
+        <header className="connector-header">
+
+          <button
+            className="back-button"
+            onClick={() =>
+              setShowConnectors(false)
+            }
+          >
+            ←
+          </button>
+
+          <div>
+            <h1>Connectors</h1>
+            <p>
+              Give Kodevo access to your development
+              tools and services.
+            </p>
+          </div>
+
+        </header>
+
+        <div className="connector-grid">
+
+          {[
+            {
+              name: "GitHub",
+              icon: "◉",
+              description:
+                "Repositories, files, branches and commits."
+            },
+            {
+              name: "Supabase",
+              icon: "◆",
+              description:
+                "Database, authentication and storage."
+            },
+            {
+              name: "Airtable",
+              icon: "▦",
+              description:
+                "Tables, records and structured data."
+            },
+            {
+              name: "Dropbox",
+              icon: "◇",
+              description:
+                "Files, folders and project assets."
+            },
+            {
+              name: "Vercel",
+              icon: "▲",
+              description:
+                "Deploy projects and manage deployments."
+            },
+            {
+              name: "More",
+              icon: "+",
+              description:
+                "More integrations will be added."
+            }
+          ].map((item) => (
+            <div
+              className="connector-card"
+              key={item.name}
+            >
+
+              <div className="connector-icon">
+                {item.icon}
+              </div>
+
+              <div className="connector-info">
+                <h2>{item.name}</h2>
+
+                <p>
+                  {item.description}
+                </p>
+              </div>
+
+              {item.name === "More" ? (
+                <button
+                  className="connector-connect disabled"
+                  disabled
+                >
+                  Soon
+                </button>
+              ) : (
+                <button
+                  className={`connector-connect ${
+                    connectors[item.name]
+                      ? "connected"
+                      : ""
+                  }`}
+                  onClick={() =>
+                    toggleConnector(item.name)
+                  }
+                >
+                  {connectors[item.name]
+                    ? "Connected"
+                    : "Connect"}
+                </button>
+              )}
+
+            </div>
+          ))}
+
+        </div>
+
+      </div>
+    );
+  }
+
+  if (selectedFile) {
+    return (
+      <div className="file-page">
+
+        <header className="file-header">
+
+          <button
+            className="back-button"
+            onClick={() =>
+              setSelectedFile(null)
+            }
+          >
+            ←
+          </button>
+
+          <div className="file-title">
+            {selectedFile.name}
+          </div>
+
+          <div className="file-tabs">
+
+            <button
+              className={
+                fileView === "code"
+                  ? "active"
+                  : ""
+              }
+              onClick={() =>
+                setFileView("code")
+              }
+            >
+              Code
+            </button>
+
+            {[
+              "html",
+              "htm"
+            ].includes(
+              selectedFile.name
+                .split(".")
+                .pop()
+                .toLowerCase()
+            ) && (
+              <button
+                className={
+                  fileView === "preview"
+                    ? "active"
+                    : ""
+                }
+                onClick={() =>
+                  setFileView("preview")
+                }
+              >
+                Preview
+              </button>
+            )}
+
+          </div>
+
+        </header>
+
+        <div className="file-viewer">
+
+          {fileView === "preview" ? (
+            <iframe
+              title={selectedFile.name}
+              className="preview-frame"
+              srcDoc={selectedFile.content}
+            />
+          ) : (
+            <pre className="code-view">
+              <code>
+                {selectedFile.content}
+              </code>
+            </pre>
+          )}
+
+        </div>
+
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -214,9 +682,25 @@ function App() {
       <aside className="sidebar">
 
         <div className="brand">
-          <div className="logo">K</div>
+          <div className="logo">
+            K
+          </div>
+
           <span>Kodevo</span>
         </div>
+
+        <button
+          className="connector-button"
+          onClick={() =>
+            setShowConnectors(true)
+          }
+        >
+          <span className="plug">
+            ⎋
+          </span>
+
+          Connectors
+        </button>
 
         <button
           className="new-project"
@@ -236,7 +720,8 @@ function App() {
             <span className="project-icon">
               ⌁
             </span>
-            Untitled project
+
+            {project.name}
           </div>
 
         </div>
@@ -246,7 +731,7 @@ function App() {
           <button
             className="sidebar-button"
             onClick={() =>
-              setShowSettings(!showSettings)
+              setShowSettings(true)
             }
           >
             <span>⚙</span>
@@ -262,20 +747,26 @@ function App() {
         <header className="topbar">
 
           <div className="project-name">
-            Untitled project
+            {project.name}
           </div>
 
           <div className="top-actions">
 
+            <div className="stage-badge">
+              {projectStageText}
+            </div>
+
             <div className="provider-badge">
               {provider}
-              {model ? ` · ${model}` : ""}
+              {model
+                ? ` · ${model}`
+                : ""}
             </div>
 
             <button
               className="settings-button"
               onClick={() =>
-                setShowSettings(!showSettings)
+                setShowSettings(true)
               }
             >
               Settings
@@ -296,12 +787,13 @@ function App() {
               </div>
 
               <h1>
-                Build with Kodevo
+                What are you building?
               </h1>
 
               <p>
-                Describe what you want to build
-                and Kodevo will help you create it.
+                Describe your idea. Kodevo will
+                understand the project, ask questions,
+                create a plan and then build it.
               </p>
 
               <div className="suggestions">
@@ -309,31 +801,31 @@ function App() {
                 <button
                   onClick={() =>
                     setMessage(
-                      "Build me a modern landing page"
+                      "I need a website for my business where I can sell products."
                     )
                   }
                 >
-                  Build a website
+                  Build a business
                 </button>
 
                 <button
                   onClick={() =>
                     setMessage(
-                      "Create a React application"
+                      "I need a full-stack application."
                     )
                   }
                 >
-                  Create an app
+                  Build an application
                 </button>
 
                 <button
                   onClick={() =>
                     setMessage(
-                      "Fix the errors in my project"
+                      "I need a Python tool."
                     )
                   }
                 >
-                  Fix my code
+                  Build software
                 </button>
 
               </div>
@@ -344,37 +836,509 @@ function App() {
 
             <div className="conversation">
 
-              {messages.map((item, index) => (
+              {messages.map(
+                (item, index) => (
 
-                <div
-                  className={`message ${item.role}`}
-                  key={index}
-                >
+                  <div
+                    className={`message ${item.role}`}
+                    key={index}
+                  >
 
-                  <div className="message-label">
-                    {item.role === "user"
-                      ? "You"
-                      : "Kodevo"}
+                    <div className="message-label">
+                      {item.role === "user"
+                        ? "You"
+                        : "Kodevo"}
+                    </div>
+
+                    <div className="message-content">
+                      {item.content}
+                    </div>
+
                   </div>
 
-                  <div className="message-content">
-                    {item.content}
+                )
+              )}
+
+              {project.files.length > 0 && (
+
+                <div className="file-section">
+
+                  <div className="file-section-title">
+                    Project files
                   </div>
+
+                  {project.files.map(
+                    (file) => (
+
+                      <button
+                        className="file-card"
+                        key={file.id}
+                        onClick={() =>
+                          setSelectedFile(file)
+                        }
+                      >
+
+                        <span className="file-status">
+                          {file.status ===
+                          "complete"
+                            ? "✓"
+                            : "◌"}
+                        </span>
+
+                        <span className="file-name">
+                          {file.name}
+                        </span>
+
+                        <span className="file-arrow">
+                          ›
+                        </span>
+
+                      </button>
+
+                    )
+                  )}
 
                 </div>
 
-              ))}
+          if (showConnectors) {
+    return (
+      <div className="connector-page">
+
+        <header className="connector-header">
+
+          <button
+            className="back-button"
+            onClick={() =>
+              setShowConnectors(false)
+            }
+          >
+            ←
+          </button>
+
+          <div>
+            <h1>Connectors</h1>
+            <p>
+              Give Kodevo access to your development
+              tools and services.
+            </p>
+          </div>
+
+        </header>
+
+        <div className="connector-grid">
+
+          {[
+            {
+              name: "GitHub",
+              icon: "◉",
+              description:
+                "Repositories, files, branches and commits."
+            },
+            {
+              name: "Supabase",
+              icon: "◆",
+              description:
+                "Database, authentication and storage."
+            },
+            {
+              name: "Airtable",
+              icon: "▦",
+              description:
+                "Tables, records and structured data."
+            },
+            {
+              name: "Dropbox",
+              icon: "◇",
+              description:
+                "Files, folders and project assets."
+            },
+            {
+              name: "Vercel",
+              icon: "▲",
+              description:
+                "Deploy projects and manage deployments."
+            },
+            {
+              name: "More",
+              icon: "+",
+              description:
+                "More integrations will be added."
+            }
+          ].map((item) => (
+            <div
+              className="connector-card"
+              key={item.name}
+            >
+
+              <div className="connector-icon">
+                {item.icon}
+              </div>
+
+              <div className="connector-info">
+                <h2>{item.name}</h2>
+
+                <p>
+                  {item.description}
+                </p>
+              </div>
+
+              {item.name === "More" ? (
+                <button
+                  className="connector-connect disabled"
+                  disabled
+                >
+                  Soon
+                </button>
+              ) : (
+                <button
+                  className={`connector-connect ${
+                    connectors[item.name]
+                      ? "connected"
+                      : ""
+                  }`}
+                  onClick={() =>
+                    toggleConnector(item.name)
+                  }
+                >
+                  {connectors[item.name]
+                    ? "Connected"
+                    : "Connect"}
+                </button>
+              )}
+
+            </div>
+          ))}
+
+        </div>
+
+      </div>
+    );
+  }
+
+  if (selectedFile) {
+    return (
+      <div className="file-page">
+
+        <header className="file-header">
+
+          <button
+            className="back-button"
+            onClick={() =>
+              setSelectedFile(null)
+            }
+          >
+            ←
+          </button>
+
+          <div className="file-title">
+            {selectedFile.name}
+          </div>
+
+          <div className="file-tabs">
+
+            <button
+              className={
+                fileView === "code"
+                  ? "active"
+                  : ""
+              }
+              onClick={() =>
+                setFileView("code")
+              }
+            >
+              Code
+            </button>
+
+            {[
+              "html",
+              "htm"
+            ].includes(
+              selectedFile.name
+                .split(".")
+                .pop()
+                .toLowerCase()
+            ) && (
+              <button
+                className={
+                  fileView === "preview"
+                    ? "active"
+                    : ""
+                }
+                onClick={() =>
+                  setFileView("preview")
+                }
+              >
+                Preview
+              </button>
+            )}
+
+          </div>
+
+        </header>
+
+        <div className="file-viewer">
+
+          {fileView === "preview" ? (
+            <iframe
+              title={selectedFile.name}
+              className="preview-frame"
+              srcDoc={selectedFile.content}
+            />
+          ) : (
+            <pre className="code-view">
+              <code>
+                {selectedFile.content}
+              </code>
+            </pre>
+          )}
+
+        </div>
+
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+
+      <aside className="sidebar">
+
+        <div className="brand">
+          <div className="logo">
+            K
+          </div>
+
+          <span>Kodevo</span>
+        </div>
+
+        <button
+          className="connector-button"
+          onClick={() =>
+            setShowConnectors(true)
+          }
+        >
+          <span className="plug">
+            ⎋
+          </span>
+
+          Connectors
+        </button>
+
+        <button
+          className="new-project"
+          onClick={newProject}
+        >
+          <span>+</span>
+          New project
+        </button>
+
+        <div className="sidebar-section">
+
+          <div className="section-title">
+            Projects
+          </div>
+
+          <div className="project active">
+            <span className="project-icon">
+              ⌁
+            </span>
+
+            {project.name}
+          </div>
+
+        </div>
+
+        <div className="sidebar-bottom">
+
+          <button
+            className="sidebar-button"
+            onClick={() =>
+              setShowSettings(true)
+            }
+          >
+            <span>⚙</span>
+            Settings
+          </button>
+
+        </div>
+
+      </aside>
+
+      <main className="main">
+
+        <header className="topbar">
+
+          <div className="project-name">
+            {project.name}
+          </div>
+
+          <div className="top-actions">
+
+            <div className="stage-badge">
+              {projectStageText}
+            </div>
+
+            <div className="provider-badge">
+              {provider}
+              {model
+                ? ` · ${model}`
+                : ""}
+            </div>
+
+            <button
+              className="settings-button"
+              onClick={() =>
+                setShowSettings(true)
+              }
+            >
+              Settings
+            </button>
+
+          </div>
+
+        </header>
+
+        <section className="workspace">
+
+          {messages.length === 0 ? (
+
+            <div className="welcome">
+
+              <div className="welcome-logo">
+                K
+              </div>
+
+              <h1>
+                What are you building?
+              </h1>
+
+              <p>
+                Describe your idea. Kodevo will
+                understand the project, ask questions,
+                create a plan and then build it.
+              </p>
+
+              <div className="suggestions">
+
+                <button
+                  onClick={() =>
+                    setMessage(
+                      "I need a website for my business where I can sell products."
+                    )
+                  }
+                >
+                  Build a business
+                </button>
+
+                <button
+                  onClick={() =>
+                    setMessage(
+                      "I need a full-stack application."
+                    )
+                  }
+                >
+                  Build an application
+                </button>
+
+                <button
+                  onClick={() =>
+                    setMessage(
+                      "I need a Python tool."
+                    )
+                  }
+                >
+                  Build software
+                </button>
+
+              </div>
+
+            </div>
+
+          ) : (
+
+            <div className="conversation">
+
+              {messages.map(
+                (item, index) => (
+
+                  <div
+                    className={`message ${item.role}`}
+                    key={index}
+                  >
+
+                    <div className="message-label">
+                      {item.role === "user"
+                        ? "You"
+                        : "Kodevo"}
+                    </div>
+
+                    <div className="message-content">
+                      {item.content}
+                    </div>
+
+                  </div>
+
+                )
+              )}
+
+              {project.files.length > 0 && (
+
+                <div className="file-section">
+
+                  <div className="file-section-title">
+                    Project files
+                  </div>
+
+                  {project.files.map(
+                    (file) => (
+
+                      <button
+                        className="file-card"
+                        key={file.id}
+                        onClick={() =>
+                          setSelectedFile(file)
+                        }
+                      >
+
+                        <span className="file-status">
+                          {file.status ===
+                          "complete"
+                            ? "✓"
+                            : "◌"}
+                        </span>
+
+                        <span className="file-name">
+                          {file.name}
+                        </span>
+
+                        <span className="file-arrow">
+                          ›
+                        </span>
+
+                      </button>
+
+                    )
+                  )}
+
+                </div>
+
+              )}
 
               {loading && (
 
-                <div className="message assistant">
+                <div className="agent-working">
 
-                  <div className="message-label">
-                    Kodevo
-                  </div>
+                  <div className="agent-spinner" />
 
-                  <div className="message-content">
-                    Thinking...
+                  <div>
+                    <strong>
+                      Kodevo is working
+                    </strong>
+
+                    <span>
+                      Understanding your project
+                      and preparing the next step...
+                    </span>
                   </div>
 
                 </div>
@@ -394,12 +1358,15 @@ function App() {
             <textarea
               value={message}
               onChange={(event) =>
-                setMessage(event.target.value)
+                setMessage(
+                  event.target.value
+                )
               }
               onKeyDown={(event) => {
 
                 if (
-                  event.key === "Enter" &&
+                  event.key ===
+                    "Enter" &&
                   !event.shiftKey
                 ) {
                   event.preventDefault();
@@ -407,18 +1374,26 @@ function App() {
                 }
 
               }}
-              placeholder="Describe what you want Kodevo to build..."
+              placeholder={
+                project.stage === "plan"
+                  ? "Answer Kodevo's questions or approve the plan..."
+                  : "Describe what you want Kodevo to build..."
+              }
             />
 
             <div className="composer-bottom">
 
               <div className="composer-tools">
 
-                <button title="Attach files">
+                <button
+                  title="Attach files"
+                >
                   +
                 </button>
 
-                <button title="Code mode">
+                <button
+                  title="Code mode"
+                >
                   &lt;/&gt;
                 </button>
 
@@ -475,7 +1450,7 @@ function App() {
 
           <select
             value={provider}
-            onChange={handleProviderChange}
+            onChange={changeProvider}
           >
             <option>
               Groq
@@ -495,7 +1470,6 @@ function App() {
           </label>
 
           <input
-            type="text"
             value={model}
             onChange={(event) =>
               setModel(event.target.value)
@@ -524,8 +1498,8 @@ function App() {
           </button>
 
           <div className="settings-note">
-            Configuration is stored locally in
-            this browser.
+            This prototype stores the provider
+            configuration locally.
           </div>
 
         </aside>
