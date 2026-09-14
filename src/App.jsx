@@ -816,8 +816,7 @@ Think like a senior software engineer and product designer.
 
     return data?.choices?.[0]?.message?.content || "No response returned.";
   }
-    }
-  }
 }
+
 
 export default App;
