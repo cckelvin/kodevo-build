@@ -1,5 +1,3 @@
-Part 1
-
 import { useEffect, useMemo, useState } from "react";
 
 const DEFAULT_MODELS = {
