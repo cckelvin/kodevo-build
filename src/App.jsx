@@ -1,4 +1,4 @@
-lookimport { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const DEFAULT_MODELS = {
   groq: "llama-3.3-70b-versatile",
