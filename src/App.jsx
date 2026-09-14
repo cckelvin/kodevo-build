@@ -1,1509 +1,819 @@
 import { useEffect, useMemo, useState } from "react";
 
 const DEFAULT_MODELS = {
-  Groq: "llama-3.3-70b-versatile",
-  OpenRouter: "openai/gpt-4o-mini",
-  Gemini: "gemini-2.0-flash"
+  groq: "llama-3.3-70b-versatile",
+  openrouter: "openai/gpt-4o-mini",
+  gemini: "gemini-2.0-flash",
+};
+
+const CONNECTOR_INFO = {
+  GitHub: {
+    description: "Repositories, files, commits and code",
+    icon: "◉",
+  },
+  Supabase: {
+    description: "Database, authentication and backend services",
+    icon: "◆",
+  },
+  Airtable: {
+    description: "Tables, records and structured data",
+    icon: "▦",
+  },
+  Dropbox: {
+    description: "Files and folders",
+    icon: "□",
+  },
+  Vercel: {
+    description: "Deployments, projects and hosting",
+    icon: "▲",
+  },
 };
 
 const INITIAL_PROJECT = {
-  name: "Untitled project",
-  stage: "understand",
+  name: "",
+  purpose: "",
+  targetUsers: "",
+  platform: "web",
+  design: {
+    theme: "",
+    colors: [],
+    style: "",
+    layout: "",
+    references: [],
+  },
+  features: [],
+  pages: [],
+  technical: {
+    framework: "",
+    database: "",
+    authentication: "",
+    payments: "",
+  },
+  integrations: [],
   requirements: [],
-  files: []
+  decisions: [],
+  files: [],
 };
 
+function loadJSON(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function App() {
-  const [provider, setProvider] = useState("Groq");
-  const [model, setModel] = useState(DEFAULT_MODELS.Groq);
-  const [apiKey, setApiKey] = useState("");
+  const [provider, setProvider] = useState(
+    () => localStorage.getItem("kodevo-provider") || "groq"
+  );
 
-  const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [model, setModel] = useState(
+    () =>
+      localStorage.getItem("kodevo-model") ||
+      DEFAULT_MODELS[localStorage.getItem("kodevo-provider") || "groq"]
+  );
 
-  const [project, setProject] = useState(INITIAL_PROJECT);
+  const [apiKey, setApiKey] = useState(
+    () => localStorage.getItem("kodevo-api-key") || ""
+  );
+
+  const [messages, setMessages] = useState(() =>
+    loadJSON("kodevo-messages", [])
+  );
+
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const [project, setProject] = useState(() =>
+    loadJSON("kodevo-project", INITIAL_PROJECT)
+  );
 
   const [showSettings, setShowSettings] = useState(false);
   const [showConnectors, setShowConnectors] = useState(false);
-  const [loading, setLoading] = useState(false);
-
   const [selectedFile, setSelectedFile] = useState(null);
-  const [fileView, setFileView] = useState("code");
+  const [fileTab, setFileTab] = useState("preview");
 
-  const [connectors, setConnectors] = useState({
-    GitHub: false,
-    Supabase: false,
-    Airtable: false,
-    Dropbox: false,
-    Vercel: false
-  });
+  const [connectors, setConnectors] = useState(() =>
+    loadJSON("kodevo-connectors", {
+      GitHub: false,
+      Supabase: false,
+      Airtable: false,
+      Dropbox: false,
+      Vercel: false,
+    })
+  );
+
+  const models = useMemo(() => DEFAULT_MODELS, []);
 
   useEffect(() => {
-    const saved = localStorage.getItem("kodevo-config");
+    localStorage.setItem("kodevo-provider", provider);
+  }, [provider]);
 
-    if (saved) {
-      try {
-        const config = JSON.parse(saved);
+  useEffect(() => {
+    localStorage.setItem("kodevo-model", model);
+  }, [model]);
 
-        setProvider(config.provider || "Groq");
+  useEffect(() => {
+    localStorage.setItem("kodevo-api-key", apiKey);
+  }, [apiKey]);
 
-        setModel(
-          config.model ||
-            DEFAULT_MODELS[config.provider || "Groq"]
-        );
+  useEffect(() => {
+    localStorage.setItem("kodevo-messages", JSON.stringify(messages));
+  }, [messages]);
 
-        setApiKey(config.apiKey || "");
-      } catch {
-        console.log("Could not load configuration.");
-      }
-    }
+  useEffect(() => {
+    localStorage.setItem("kodevo-project", JSON.stringify(project));
+  }, [project]);
 
-    const savedConnectors =
-      localStorage.getItem("kodevo-connectors");
+  useEffect(() => {
+    localStorage.setItem("kodevo-connectors", JSON.stringify(connectors));
+  }, [connectors]);
 
-    if (savedConnectors) {
-      try {
-        setConnectors(JSON.parse(savedConnectors));
-      } catch {
-        console.log("Could not load connectors.");
-      }
-    }
-  }, []);
+  function changeProvider(value) {
+    setProvider(value);
+    setModel(DEFAULT_MODELS[value]);
+  }
 
-  const saveConfiguration = () => {
-    localStorage.setItem(
-      "kodevo-config",
-      JSON.stringify({
-        provider,
-        model,
-        apiKey
-      })
-    );
+  function saveConfig() {
+    localStorage.setItem("kodevo-provider", provider);
+    localStorage.setItem("kodevo-model", model);
+    localStorage.setItem("kodevo-api-key", apiKey);
+    setShowSettings(false);
+  }
 
-    alert("Configuration saved.");
-  };
-
-  const saveConnectors = (next) => {
-    setConnectors(next);
-
-    localStorage.setItem(
-      "kodevo-connectors",
-      JSON.stringify(next)
-    );
-  };
-
-  const newProject = () => {
+  function newProject() {
     setMessages([]);
-
-    setProject({
-      ...INITIAL_PROJECT,
-      name: "Untitled project"
-    });
-
-    setMessage("");
+    setProject(INITIAL_PROJECT);
     setSelectedFile(null);
-  };
+    localStorage.removeItem("kodevo-messages");
+    localStorage.removeItem("kodevo-project");
+  }
 
-  const changeProvider = (event) => {
-    const nextProvider = event.target.value;
+  function saveConnectors(next) {
+    setConnectors(next);
+    localStorage.setItem("kodevo-connectors", JSON.stringify(next));
+  }
 
-    setProvider(nextProvider);
+  function toggleConnector(name) {
+    const next = {
+      ...connectors,
+      [name]: !connectors[name],
+    };
 
-    setModel(
-      DEFAULT_MODELS[nextProvider] || ""
-    );
-  };
+    saveConnectors(next);
+  }
 
-  const detectStage = (text) => {
+  function detectMode(text) {
     const value = text.toLowerCase();
 
     if (
       value.includes("build") ||
       value.includes("create") ||
-      value.includes("code") ||
-      value.includes("implement")
+      value.includes("make") ||
+      value.includes("develop")
     ) {
-      return "plan";
+      return "build";
+    }
+
+    if (
+      value.includes("fix") ||
+      value.includes("bug") ||
+      value.includes("error") ||
+      value.includes("broken")
+    ) {
+      return "debug";
     }
 
     return "understand";
-  };
+  }
 
-  const extractFiles = (text) => {
+  function extractFiles(text) {
     const files = [];
-
     const regex =
-      /(?:```|~~~)\s*(?:[a-zA-Z0-9+#.-]+)?\s*(?:\n)?([\s\S]*?)(?:```|~~~)/g;
+      /(?:^|\n)\s*(?:file\s*)?([a-zA-Z0-9_./-]+\.(?:html|css|js|jsx|ts|tsx|json|py|java|cpp|c|cs|go|rs|php|rb|swift|kt|sql|md|yml|yaml|xml|sh|bash|vue|svelte))\b/g;
 
     let match;
-    let counter = 1;
 
     while ((match = regex.exec(text)) !== null) {
-      const code = match[1].trim();
-
-      if (!code) continue;
-
-      let filename = `file-${counter}.txt`;
-
-      const lines = code.split("\n");
-
-      if (
-        lines[0].startsWith("// FILE:") ||
-        lines[0].startsWith("# FILE:") ||
-        lines[0].startsWith("/* FILE:")
-      ) {
-        filename = lines[0]
-          .replace("// FILE:", "")
-          .replace("# FILE:", "")
-          .replace("/* FILE:", "")
-          .replace("*/", "")
-          .trim();
-
-        lines.shift();
+      if (!files.includes(match[1])) {
+        files.push(match[1]);
       }
-
-      files.push({
-        id: `${Date.now()}-${counter}`,
-        name: filename,
-        content: lines.join("\n"),
-        status: "complete"
-      });
-
-      counter++;
     }
 
     return files;
-  };
+  }
 
-  const callAI = async (
-    userMessage,
-    previousMessages,
-    mode
-  ) => {
+  async function callAI(conversation) {
     if (!apiKey.trim()) {
-      throw new Error(
-        "Please enter your API key in Settings."
-      );
+      throw new Error("Add your API key in Settings first.");
     }
 
-    let systemPrompt = `
-You are Kodevo, an advanced AI software-building agent.
+    const systemPrompt = `
+You are Kodevo, an advanced AI software engineering agent.
 
-You are NOT limited to HTML.
+Your job is to understand the user's software project before writing code.
 
-You can work with:
-HTML, CSS, JavaScript, TypeScript, React, Next.js,
-Python, Java, C, C++, C#, PHP, Go, Rust, SQL,
-JSON, YAML, shell scripts and other programming languages.
+You can work with ANY programming language or file type.
 
-Your job is to understand the user's goal before coding.
+Do not assume the project is HTML-only.
 
-Do not immediately start coding when important requirements
-are missing.
+When the user's request is incomplete, ask useful questions before coding.
+Ask only the questions that are actually necessary.
 
-Ask useful questions naturally, one or a few at a time.
+Once enough information is known:
+1. Summarize your understanding.
+2. Create a clear implementation plan.
+3. Explain what you will build.
+4. Then generate the required files.
 
-Remember decisions made during the conversation.
+During implementation, communicate progress naturally.
 
-When enough information is known, create a clear implementation
-plan.
+When generating files, clearly label them using:
+FILE: filename.ext
 
-When the user confirms the plan or clearly asks you to build,
-begin implementation.
+Then provide the complete file contents.
 
-During implementation:
-- Explain what you are doing.
-- Break the work into logical stages.
-- Identify files being created or changed.
-- Respect the requested design.
-- Respect the requested programming language/framework.
-- Think about responsive design where appropriate.
-- Consider accessibility.
-- Consider errors and edge cases.
-- Do not claim that an external service was actually connected
-  unless a real tool has performed that action.
-
-When producing code files, use this format:
-
-// FILE: path/to/file.ext
-code here
-
-Place each file inside its own fenced code block.
-
-The filename must appear immediately after FILE:.
-
-Do not assume the project is a website.
-The project can be any type of software.
+Think like a senior software engineer and product designer.
 `;
 
-    if (mode === "plan") {
-      systemPrompt += `
-The user is currently moving toward implementation.
-
-First understand whether requirements are sufficient.
-If they are not sufficient, ask the missing questions.
-
-If they are sufficient, produce:
-1. Understanding
-2. Plan
-3. Architecture
-4. Files that will be created
-5. Technologies
-6. Next implementation step
-
-Do not pretend that files have already been created.
-`;
-    }
-
-    if (mode === "build") {
-      systemPrompt += `
-The user is now asking you to build.
-
-Provide the implementation and actual source files.
-
-After each logical group of files, explain what has been
-completed and what you are doing next.
-`;
-    }
-
-    const conversation = [
+    const messagesForAI = [
       {
         role: "system",
-        content: systemPrompt
+        content: systemPrompt,
       },
-      ...previousMessages
-        .filter(
-          (item) =>
-            item.role === "user" ||
-            item.role === "assistant"
-        )
-        .map((item) => ({
-          role: item.role,
-          content: item.content
-        })),
-      {
-        role: "user",
-        content: userMessage
-      }
+      ...conversation.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
     ];
 
     let response;
 
-    if (provider === "Gemini") {
+    if (provider === "gemini") {
       response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
+          apiKey
+        )}`,
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            contents: conversation
-              .filter(
-                (item) => item.role !== "system"
-              )
-              .map((item) => ({
-                role:
-                  item.role === "assistant"
-                    ? "model"
-                    : "user",
-                parts: [
-                  {
-                    text: item.content
-                  }
-                ]
+            contents: messagesForAI
+              .filter((m) => m.role !== "system")
+              .map((m) => ({
+                role: m.role === "assistant" ? "model" : "user",
+                parts: [{ text: m.content }],
               })),
             systemInstruction: {
-              parts: [
-                {
-                  text: systemPrompt
-                }
-              ]
-            }
-          })
+              parts: [{ text: systemPrompt }],
+            },
+          }),
         }
       );
     } else {
       const endpoint =
-        provider === "OpenRouter"
-          ? "https://openrouter.ai/api/v1/chat/completions"
-          : "https://api.groq.com/openai/v1/chat/completions";
+        provider === "groq"
+          ? "https://api.groq.com/openai/v1/chat/completions"
+          : "https://openrouter.ai/api/v1/chat/completions";
 
       response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model,
-          messages: conversation,
-          temperature: 0.5
-        })
+          messages: messagesForAI,
+          temperature: 0.4,
+        }),
       });
     }
+
+  async function sendMessage() {
+    const text = input.trim();
+
+    if (!text || loading) return;
+
+    const userMessage = {
+      role: "user",
+      content: text,
+    };
+
+    const nextMessages = [...messages, userMessage];
+
+    setMessages(nextMessages);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const response = await callAI(nextMessages);
+
+      const files = extractFiles(response);
+
+      if (files.length > 0) {
+        setProject((current) => ({
+          ...current,
+          files: [
+            ...current.files,
+            ...files
+              .filter(
+                (file) =>
+                  !current.files.some(
+                    (existing) =>
+                      typeof existing === "string"
+                        ? existing === file
+                        : existing.name === file
+                  )
+              )
+              .map((file) => ({
+                name: file,
+                content: "",
+                language: file.split(".").pop(),
+              })),
+          ],
+        }));
+      }
+
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: response,
+        },
+      ]);
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: `Error: ${error.message}`,
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function getFileName(file) {
+    return typeof file === "string" ? file : file.name;
+  }
+
+  function getFileContent(file) {
+    return typeof file === "string" ? "" : file.content || "";
+  }
+
+  function isHTMLFile(file) {
+    const name = getFileName(file).toLowerCase();
+    return name.endsWith(".html") || name.endsWith(".htm");
+  }
+
+  function openFile(file) {
+    setSelectedFile(file);
+    setFileTab(isHTMLFile(file) ? "preview" : "code");
+  }
+
+  function updateProjectField(field, value) {
+    setProject((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  if (showConnectors) {
+    return (
+      <div className="kodevo-fullscreen">
+        <div className="kodevo-fullscreen-header">
+          <button
+            className="icon-button"
+            onClick={() => setShowConnectors(false)}
+          >
+            ←
+          </button>
+
+          <div>
+            <h1>Connectors</h1>
+            <p>Connect Kodevo to the services your projects use.</p>
+          </div>
+        </div>
+
+        <div className="connector-grid">
+          {Object.entries(CONNECTOR_INFO).map(([name, info]) => (
+            <div className="connector-card" key={name}>
+              <div className="connector-icon">{info.icon}</div>
+
+              <div className="connector-main">
+                <h3>{name}</h3>
+                <p>{info.description}</p>
+              </div>
+
+              <button
+                className={
+                  connectors[name]
+                    ? "connector-button connected"
+                    : "connector-button"
+                }
+                onClick={() => toggleConnector(name)}
+              >
+                {connectors[name] ? "Connected" : "Connect"}
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="connector-note">
+          <strong>Connector system</strong>
+          <p>
+            These controls currently store connection state locally. Real
+            authorization and API operations will be handled by Kodevo's
+            secure backend/tool layer.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (selectedFile) {
+    const fileName = getFileName(selectedFile);
+    const fileContent = getFileContent(selectedFile);
+
+    return (
+      <div className="kodevo-fullscreen file-viewer">
+        <div className="kodevo-fullscreen-header">
+          <button
+            className="icon-button"
+            onClick={() => setSelectedFile(null)}
+          >
+            ←
+          </button>
+
+          <div className="file-viewer-title">
+            <div className="file-type-icon">
+              {fileName.split(".").pop()?.toUpperCase()}
+            </div>
+
+            <div>
+              <h1>{fileName}</h1>
+              <p>Project file</p>
+            </div>
+          </div>
+        </div>
+
+        {isHTMLFile(selectedFile) && (
+          <div className="file-tabs">
+            <button
+              className={fileTab === "preview" ? "active" : ""}
+              onClick={() => setFileTab("preview")}
+            >
+              Preview
+            </button>
+
+            <button
+              className={fileTab === "code" ? "active" : ""}
+              onClick={() => setFileTab("code")}
+            >
+              Code
+            </button>
+          </div>
+        )}
+
+        <div className="file-viewer-body">
+          {fileTab === "preview" && isHTMLFile(selectedFile) ? (
+            <iframe
+              title={fileName}
+              className="html-preview"
+              srcDoc={fileContent}
+            />
+          ) : (
+            <pre className="code-viewer">
+              <code>{fileContent || "// File content will appear here."}</code>
+            </pre>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="kodevo-app">
+      <aside className="kodevo-sidebar">
+        <div className="kodevo-brand">
+          <div className="kodevo-logo">K</div>
+          <span>Kodevo</span>
+        </div>
+
+        <div className="sidebar-actions">
+          <button
+            className="sidebar-button connector-sidebar-button"
+            onClick={() => setShowConnectors(true)}
+          >
+            <span>⌕</span>
+            <span>Connector</span>
+          </button>
+
+          <button className="sidebar-button" onClick={newProject}>
+            <span>＋</span>
+            <span>New project</span>
+          </button>
+        </div>
+
+        <div className="sidebar-section">
+          <div className="sidebar-label">PROJECT</div>
+
+          {project.name ? (
+            <div className="sidebar-project">
+              <div className="project-dot" />
+              <span>{project.name}</span>
+            </div>
+          ) : (
+            <div className="sidebar-empty">No project yet</div>
+          )}
+        </div>
+
+        <div className="sidebar-section">
+          <div className="sidebar-label">FILES</div>
+
+          {project.files.length === 0 ? (
+            <div className="sidebar-empty">Files appear while building</div>
+          ) : (
+            <div className="sidebar-files">
+              {project.files.map((file, index) => (
+                <button
+                  className="sidebar-file"
+                  key={`${getFileName(file)}-${index}`}
+                  onClick={() => openFile(file)}
+                >
+                  <span>◇</span>
+                  <span>{getFileName(file)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="sidebar-bottom">
+          <button
+            className="sidebar-button"
+            onClick={() => setShowSettings(true)}
+          >
+            <span>⚙</span>
+            <span>Settings</span>
+          </button>
+        </div>
+      </aside>
+
+      <main className="kodevo-main">
+        <header className="kodevo-topbar">
+          <div className="topbar-project">
+            {project.name || "New project"}
+          </div>
+
+          <div className="topbar-actions">
+            <button
+              className="topbar-button"
+              onClick={() => setShowSettings(true)}
+            >
+              Settings
+            </button>
+          </div>
+        </header>
+
+        <section className="kodevo-workspace">
+          {messages.length === 0 ? (
+            <div className="kodevo-welcome">
+              <div className="welcome-mark">K</div>
+
+              <h1>What are you building?</h1>
+
+              <p>
+                Describe your idea. Kodevo will understand the requirements,
+                ask the important questions, create a plan, and build it.
+              </p>
+
+              <div className="example-prompts">
+                <button
+                  onClick={() =>
+                    setInput(
+                      "I need a website for my business where customers can browse products and buy them."
+                    )
+                  }
+                >
+                  Build a business website
+                </button>
+
+                <button
+                  onClick={() =>
+                    setInput(
+                      "Build me a full-stack application with authentication and a database."
+                    )
+                  }
+                >
+                  Build a full-stack app
+                </button>
+
+                <button
+                  onClick={() =>
+                    setInput(
+                      "I want to create a mobile application. Help me plan it first."
+                    )
+                  }
+                >
+                  Plan a mobile app
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="kodevo-conversation">
+              {messages.map((message, index) => (
+                <div
+                  className={
+                    message.role === "user"
+                      ? "message-row user-message"
+                      : "message-row assistant-message"
+                  }
+                  key={`${message.role}-${index}`}
+                >
+                  <div className="message-avatar">
+                    {message.role === "user" ? "U" : "K"}
+                  </div>
+
+                  <div className="message-content">
+                    <div className="message-role">
+                      {message.role === "user" ? "You" : "Kodevo"}
+                    </div>
+
+                    <div className="message-text">
+                      {message.content}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {loading && (
+                <div className="message-row assistant-message">
+                  <div className="message-avatar">K</div>
+
+                  <div className="message-content">
+                    <div className="message-role">Kodevo</div>
+
+                    <div className="thinking-indicator">
+                      <span />
+                      <span />
+                      <span />
+                      <em>Thinking...</em>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {project.files.length > 0 && (
+                <div className="generated-files">
+                  <div className="generated-files-title">
+                    Project files
+                  </div>
+
+                  {project.files.map((file, index) => (
+                    <button
+                      className="file-card"
+                      key={`${getFileName(file)}-${index}`}
+                      onClick={() => openFile(file)}
+                    >
+                      <div className="file-card-icon">
+                        {getFileName(file)
+                          .split(".")
+                          .pop()
+                          ?.toUpperCase()}
+                      </div>
+
+                      <div className="file-card-info">
+                        <strong>{getFileName(file)}</strong>
+                        <span>Open file</span>
+                      </div>
+
+                      <div className="file-card-arrow">→</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        <div className="kodevo-composer-wrap">
+          <div className="kodevo-composer">
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Tell Kodevo what you want to build..."
+              rows={1}
+              disabled={loading}
+            />
+
+            <div className="composer-bottom">
+              <div className="composer-info">
+                <span>{provider}</span>
+                <span>•</span>
+                <span>{model}</span>
+              </div>
+
+              <button
+                className="send-button"
+                onClick={sendMessage}
+                disabled={!input.trim() || loading}
+              >
+                ↑
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {showSettings && (
+        <div className="settings-overlay">
+          <div className="settings-panel">
+            <div className="settings-header">
+              <div>
+                <h2>Settings</h2>
+                <p>Configure the AI provider used by Kodevo.</p>
+              </div>
+
+              <button
+                className="icon-button"
+                onClick={() => setShowSettings(false)}
+              >
+                ×
+              </button>
+            </div>
+
+            <label>Provider</label>
+
+            <select
+              value={provider}
+              onChange={(event) => changeProvider(event.target.value)}
+            >
+              <option value="groq">Groq</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+
+            <label>Model</label>
+
+            <input
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder="Model name"
+            />
+
+            <label>API key</label>
+
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder="Enter API key"
+            />
+
+            <button className="save-settings" onClick={saveConfig}>
+              Save configuration
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;
 
     const data = await response.json();
 
     if (!response.ok) {
       throw new Error(
         data?.error?.message ||
-          data?.message ||
-          `API request failed (${response.status})`
+          data?.error ||
+          `API request failed with status ${response.status}`
       );
     }
 
-    if (provider === "Gemini") {
+    if (provider === "gemini") {
       return (
-        data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        "The AI returned an empty response."
+        data?.candidates?.[0]?.content?.parts
+          ?.map((part) => part.text || "")
+          .join("") || "No response returned."
       );
     }
 
-    return (
-      data?.choices?.[0]?.message?.content ||
-      "The AI returned an empty response."
-    );
-  };
-
-  const sendMessage = async () => {
-    const text = message.trim();
-
-    if (!text || loading) return;
-
-    const userItem = {
-      role: "user",
-      content: text
-    };
-
-    const previousMessages = messages;
-
-    setMessages((current) => [
-      ...current,
-      userItem
-    ]);
-
-    setMessage("");
-    setLoading(true);
-
-    const nextStage = detectStage(text);
-
-    if (nextStage === "plan") {
-      setProject((current) => ({
-        ...current,
-        stage: "plan"
-      }));
-    }
-
-    try {
-      const answer = await callAI(
-        text,
-        previousMessages,
-        nextStage === "plan"
-          ? "plan"
-          : project.stage === "plan"
-          ? "build"
-          : "understand"
-      );
-
-      const newFiles = extractFiles(answer);
-
-      if (newFiles.length > 0) {
-        setProject((current) => ({
-          ...current,
-          stage: "build",
-          files: [
-            ...current.files,
-            ...newFiles
-          ]
-        }));
-      }
-
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content: answer
-        }
-      ]);
-
-      if (
-        newFiles.length > 0
-      ) {
-        setProject((current) => ({
-          ...current,
-          stage: "build"
-        }));
-      }
-    } catch (error) {
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content: `Error: ${error.message}`
-        }
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const projectStageText = useMemo(() => {
-    switch (project.stage) {
-      case "understand":
-        return "Understanding";
-      case "plan":
-        return "Planning";
-      case "build":
-        return "Building";
-      case "verify":
-        return "Verifying";
-      case "done":
-        return "Complete";
-      default:
-        return "Working";
-    }
-  }, [project.stage]);
-
-  const toggleConnector = (name) => {
-    const next = {
-      ...connectors,
-      [name]: !connectors[name]
-    };
-
-    saveConnectors(next);
-  };
-
-  if (showConnectors) {
-    return (
-      <div className="connector-page">
-
-        <header className="connector-header">
-
-          <button
-            className="back-button"
-            onClick={() =>
-              setShowConnectors(false)
-            }
-          >
-            ←
-          </button>
-
-          <div>
-            <h1>Connectors</h1>
-            <p>
-              Give Kodevo access to your development
-              tools and services.
-            </p>
-          </div>
-
-        </header>
-
-        <div className="connector-grid">
-
-          {[
-            {
-              name: "GitHub",
-              icon: "◉",
-              description:
-                "Repositories, files, branches and commits."
-            },
-            {
-              name: "Supabase",
-              icon: "◆",
-              description:
-                "Database, authentication and storage."
-            },
-            {
-              name: "Airtable",
-              icon: "▦",
-              description:
-                "Tables, records and structured data."
-            },
-            {
-              name: "Dropbox",
-              icon: "◇",
-              description:
-                "Files, folders and project assets."
-            },
-            {
-              name: "Vercel",
-              icon: "▲",
-              description:
-                "Deploy projects and manage deployments."
-            },
-            {
-              name: "More",
-              icon: "+",
-              description:
-                "More integrations will be added."
-            }
-          ].map((item) => (
-            <div
-              className="connector-card"
-              key={item.name}
-            >
-
-              <div className="connector-icon">
-                {item.icon}
-              </div>
-
-              <div className="connector-info">
-                <h2>{item.name}</h2>
-
-                <p>
-                  {item.description}
-                </p>
-              </div>
-
-              {item.name === "More" ? (
-                <button
-                  className="connector-connect disabled"
-                  disabled
-                >
-                  Soon
-                </button>
-              ) : (
-                <button
-                  className={`connector-connect ${
-                    connectors[item.name]
-                      ? "connected"
-                      : ""
-                  }`}
-                  onClick={() =>
-                    toggleConnector(item.name)
-                  }
-                >
-                  {connectors[item.name]
-                    ? "Connected"
-                    : "Connect"}
-                </button>
-              )}
-
-            </div>
-          ))}
-
-        </div>
-
-      </div>
-    );
+    return data?.choices?.[0]?.message?.content || "No response returned.";
   }
-
-  if (selectedFile) {
-    return (
-      <div className="file-page">
-
-        <header className="file-header">
-
-          <button
-            className="back-button"
-            onClick={() =>
-              setSelectedFile(null)
-            }
-          >
-            ←
-          </button>
-
-          <div className="file-title">
-            {selectedFile.name}
-          </div>
-
-          <div className="file-tabs">
-
-            <button
-              className={
-                fileView === "code"
-                  ? "active"
-                  : ""
-              }
-              onClick={() =>
-                setFileView("code")
-              }
-            >
-              Code
-            </button>
-
-            {[
-              "html",
-              "htm"
-            ].includes(
-              selectedFile.name
-                .split(".")
-                .pop()
-                .toLowerCase()
-            ) && (
-              <button
-                className={
-                  fileView === "preview"
-                    ? "active"
-                    : ""
-                }
-                onClick={() =>
-                  setFileView("preview")
-                }
-              >
-                Preview
-              </button>
-            )}
-
-          </div>
-
-        </header>
-
-        <div className="file-viewer">
-
-          {fileView === "preview" ? (
-            <iframe
-              title={selectedFile.name}
-              className="preview-frame"
-              srcDoc={selectedFile.content}
-            />
-          ) : (
-            <pre className="code-view">
-              <code>
-                {selectedFile.content}
-              </code>
-            </pre>
-          )}
-
-        </div>
-
-      </div>
-    );
-  }
-
-  return (
-    <div className="app">
-
-      <aside className="sidebar">
-
-        <div className="brand">
-          <div className="logo">
-            K
-          </div>
-
-          <span>Kodevo</span>
-        </div>
-
-        <button
-          className="connector-button"
-          onClick={() =>
-            setShowConnectors(true)
-          }
-        >
-          <span className="plug">
-            ⎋
-          </span>
-
-          Connectors
-        </button>
-
-        <button
-          className="new-project"
-          onClick={newProject}
-        >
-          <span>+</span>
-          New project
-        </button>
-
-        <div className="sidebar-section">
-
-          <div className="section-title">
-            Projects
-          </div>
-
-          <div className="project active">
-            <span className="project-icon">
-              ⌁
-            </span>
-
-            {project.name}
-          </div>
-
-        </div>
-
-        <div className="sidebar-bottom">
-
-          <button
-            className="sidebar-button"
-            onClick={() =>
-              setShowSettings(true)
-            }
-          >
-            <span>⚙</span>
-            Settings
-          </button>
-
-        </div>
-
-      </aside>
-
-      <main className="main">
-
-        <header className="topbar">
-
-          <div className="project-name">
-            {project.name}
-          </div>
-
-          <div className="top-actions">
-
-            <div className="stage-badge">
-              {projectStageText}
-            </div>
-
-            <div className="provider-badge">
-              {provider}
-              {model
-                ? ` · ${model}`
-                : ""}
-            </div>
-
-            <button
-              className="settings-button"
-              onClick={() =>
-                setShowSettings(true)
-              }
-            >
-              Settings
-            </button>
-
-          </div>
-
-        </header>
-
-        <section className="workspace">
-
-          {messages.length === 0 ? (
-
-            <div className="welcome">
-
-              <div className="welcome-logo">
-                K
-              </div>
-
-              <h1>
-                What are you building?
-              </h1>
-
-              <p>
-                Describe your idea. Kodevo will
-                understand the project, ask questions,
-                create a plan and then build it.
-              </p>
-
-              <div className="suggestions">
-
-                <button
-                  onClick={() =>
-                    setMessage(
-                      "I need a website for my business where I can sell products."
-                    )
-                  }
-                >
-                  Build a business
-                </button>
-
-                <button
-                  onClick={() =>
-                    setMessage(
-                      "I need a full-stack application."
-                    )
-                  }
-                >
-                  Build an application
-                </button>
-
-                <button
-                  onClick={() =>
-                    setMessage(
-                      "I need a Python tool."
-                    )
-                  }
-                >
-                  Build software
-                </button>
-
-              </div>
-
-            </div>
-
-          ) : (
-
-            <div className="conversation">
-
-              {messages.map(
-                (item, index) => (
-
-                  <div
-                    className={`message ${item.role}`}
-                    key={index}
-                  >
-
-                    <div className="message-label">
-                      {item.role === "user"
-                        ? "You"
-                        : "Kodevo"}
-                    </div>
-
-                    <div className="message-content">
-                      {item.content}
-                    </div>
-
-                  </div>
-
-                )
-              )}
-
-              {project.files.length > 0 && (
-
-                <div className="file-section">
-
-                  <div className="file-section-title">
-                    Project files
-                  </div>
-
-                  {project.files.map(
-                    (file) => (
-
-                      <button
-                        className="file-card"
-                        key={file.id}
-                        onClick={() =>
-                          setSelectedFile(file)
-                        }
-                      >
-
-                        <span className="file-status">
-                          {file.status ===
-                          "complete"
-                            ? "✓"
-                            : "◌"}
-                        </span>
-
-                        <span className="file-name">
-                          {file.name}
-                        </span>
-
-                        <span className="file-arrow">
-                          ›
-                        </span>
-
-                      </button>
-
-                    )
-                  )}
-
-                </div>
-
-          if (showConnectors) {
-    return (
-      <div className="connector-page">
-
-        <header className="connector-header">
-
-          <button
-            className="back-button"
-            onClick={() =>
-              setShowConnectors(false)
-            }
-          >
-            ←
-          </button>
-
-          <div>
-            <h1>Connectors</h1>
-            <p>
-              Give Kodevo access to your development
-              tools and services.
-            </p>
-          </div>
-
-        </header>
-
-        <div className="connector-grid">
-
-          {[
-            {
-              name: "GitHub",
-              icon: "◉",
-              description:
-                "Repositories, files, branches and commits."
-            },
-            {
-              name: "Supabase",
-              icon: "◆",
-              description:
-                "Database, authentication and storage."
-            },
-            {
-              name: "Airtable",
-              icon: "▦",
-              description:
-                "Tables, records and structured data."
-            },
-            {
-              name: "Dropbox",
-              icon: "◇",
-              description:
-                "Files, folders and project assets."
-            },
-            {
-              name: "Vercel",
-              icon: "▲",
-              description:
-                "Deploy projects and manage deployments."
-            },
-            {
-              name: "More",
-              icon: "+",
-              description:
-                "More integrations will be added."
-            }
-          ].map((item) => (
-            <div
-              className="connector-card"
-              key={item.name}
-            >
-
-              <div className="connector-icon">
-                {item.icon}
-              </div>
-
-              <div className="connector-info">
-                <h2>{item.name}</h2>
-
-                <p>
-                  {item.description}
-                </p>
-              </div>
-
-              {item.name === "More" ? (
-                <button
-                  className="connector-connect disabled"
-                  disabled
-                >
-                  Soon
-                </button>
-              ) : (
-                <button
-                  className={`connector-connect ${
-                    connectors[item.name]
-                      ? "connected"
-                      : ""
-                  }`}
-                  onClick={() =>
-                    toggleConnector(item.name)
-                  }
-                >
-                  {connectors[item.name]
-                    ? "Connected"
-                    : "Connect"}
-                </button>
-              )}
-
-            </div>
-          ))}
-
-        </div>
-
-      </div>
-    );
-  }
-
-  if (selectedFile) {
-    return (
-      <div className="file-page">
-
-        <header className="file-header">
-
-          <button
-            className="back-button"
-            onClick={() =>
-              setSelectedFile(null)
-            }
-          >
-            ←
-          </button>
-
-          <div className="file-title">
-            {selectedFile.name}
-          </div>
-
-          <div className="file-tabs">
-
-            <button
-              className={
-                fileView === "code"
-                  ? "active"
-                  : ""
-              }
-              onClick={() =>
-                setFileView("code")
-              }
-            >
-              Code
-            </button>
-
-            {[
-              "html",
-              "htm"
-            ].includes(
-              selectedFile.name
-                .split(".")
-                .pop()
-                .toLowerCase()
-            ) && (
-              <button
-                className={
-                  fileView === "preview"
-                    ? "active"
-                    : ""
-                }
-                onClick={() =>
-                  setFileView("preview")
-                }
-              >
-                Preview
-              </button>
-            )}
-
-          </div>
-
-        </header>
-
-        <div className="file-viewer">
-
-          {fileView === "preview" ? (
-            <iframe
-              title={selectedFile.name}
-              className="preview-frame"
-              srcDoc={selectedFile.content}
-            />
-          ) : (
-            <pre className="code-view">
-              <code>
-                {selectedFile.content}
-              </code>
-            </pre>
-          )}
-
-        </div>
-
-      </div>
-    );
-  }
-
-  return (
-    <div className="app">
-
-      <aside className="sidebar">
-
-        <div className="brand">
-          <div className="logo">
-            K
-          </div>
-
-          <span>Kodevo</span>
-        </div>
-
-        <button
-          className="connector-button"
-          onClick={() =>
-            setShowConnectors(true)
-          }
-        >
-          <span className="plug">
-            ⎋
-          </span>
-
-          Connectors
-        </button>
-
-        <button
-          className="new-project"
-          onClick={newProject}
-        >
-          <span>+</span>
-          New project
-        </button>
-
-        <div className="sidebar-section">
-
-          <div className="section-title">
-            Projects
-          </div>
-
-          <div className="project active">
-            <span className="project-icon">
-              ⌁
-            </span>
-
-            {project.name}
-          </div>
-
-        </div>
-
-        <div className="sidebar-bottom">
-
-          <button
-            className="sidebar-button"
-            onClick={() =>
-              setShowSettings(true)
-            }
-          >
-            <span>⚙</span>
-            Settings
-          </button>
-
-        </div>
-
-      </aside>
-
-      <main className="main">
-
-        <header className="topbar">
-
-          <div className="project-name">
-            {project.name}
-          </div>
-
-          <div className="top-actions">
-
-            <div className="stage-badge">
-              {projectStageText}
-            </div>
-
-            <div className="provider-badge">
-              {provider}
-              {model
-                ? ` · ${model}`
-                : ""}
-            </div>
-
-            <button
-              className="settings-button"
-              onClick={() =>
-                setShowSettings(true)
-              }
-            >
-              Settings
-            </button>
-
-          </div>
-
-        </header>
-
-        <section className="workspace">
-
-          {messages.length === 0 ? (
-
-            <div className="welcome">
-
-              <div className="welcome-logo">
-                K
-              </div>
-
-              <h1>
-                What are you building?
-              </h1>
-
-              <p>
-                Describe your idea. Kodevo will
-                understand the project, ask questions,
-                create a plan and then build it.
-              </p>
-
-              <div className="suggestions">
-
-                <button
-                  onClick={() =>
-                    setMessage(
-                      "I need a website for my business where I can sell products."
-                    )
-                  }
-                >
-                  Build a business
-                </button>
-
-                <button
-                  onClick={() =>
-                    setMessage(
-                      "I need a full-stack application."
-                    )
-                  }
-                >
-                  Build an application
-                </button>
-
-                <button
-                  onClick={() =>
-                    setMessage(
-                      "I need a Python tool."
-                    )
-                  }
-                >
-                  Build software
-                </button>
-
-              </div>
-
-            </div>
-
-          ) : (
-
-            <div className="conversation">
-
-              {messages.map(
-                (item, index) => (
-
-                  <div
-                    className={`message ${item.role}`}
-                    key={index}
-                  >
-
-                    <div className="message-label">
-                      {item.role === "user"
-                        ? "You"
-                        : "Kodevo"}
-                    </div>
-
-                    <div className="message-content">
-                      {item.content}
-                    </div>
-
-                  </div>
-
-                )
-              )}
-
-              {project.files.length > 0 && (
-
-                <div className="file-section">
-
-                  <div className="file-section-title">
-                    Project files
-                  </div>
-
-                  {project.files.map(
-                    (file) => (
-
-                      <button
-                        className="file-card"
-                        key={file.id}
-                        onClick={() =>
-                          setSelectedFile(file)
-                        }
-                      >
-
-                        <span className="file-status">
-                          {file.status ===
-                          "complete"
-                            ? "✓"
-                            : "◌"}
-                        </span>
-
-                        <span className="file-name">
-                          {file.name}
-                        </span>
-
-                        <span className="file-arrow">
-                          ›
-                        </span>
-
-                      </button>
-
-                    )
-                  )}
-
-                </div>
-
-              )}
-
-              {loading && (
-
-                <div className="agent-working">
-
-                  <div className="agent-spinner" />
-
-                  <div>
-                    <strong>
-                      Kodevo is working
-                    </strong>
-
-                    <span>
-                      Understanding your project
-                      and preparing the next step...
-                    </span>
-                  </div>
-
-                </div>
-
-              )}
-
-            </div>
-
-          )}
-
-        </section>
-
-        <div className="composer-area">
-
-          <div className="composer">
-
-            <textarea
-              value={message}
-              onChange={(event) =>
-                setMessage(
-                  event.target.value
-                )
-              }
-              onKeyDown={(event) => {
-
-                if (
-                  event.key ===
-                    "Enter" &&
-                  !event.shiftKey
-                ) {
-                  event.preventDefault();
-                  sendMessage();
-                }
-
-              }}
-              placeholder={
-                project.stage === "plan"
-                  ? "Answer Kodevo's questions or approve the plan..."
-                  : "Describe what you want Kodevo to build..."
-              }
-            />
-
-            <div className="composer-bottom">
-
-              <div className="composer-tools">
-
-                <button
-                  title="Attach files"
-                >
-                  +
-                </button>
-
-                <button
-                  title="Code mode"
-                >
-                  &lt;/&gt;
-                </button>
-
-              </div>
-
-              <button
-                className="send-button"
-                onClick={sendMessage}
-                disabled={
-                  !message.trim() ||
-                  loading
-                }
-              >
-                ↑
-              </button>
-
-            </div>
-
-          </div>
-
-          <div className="disclaimer">
-            Kodevo can make mistakes. Review
-            generated code before using it.
-          </div>
-
-        </div>
-
-      </main>
-
-      {showSettings && (
-
-        <aside className="settings-panel">
-
-          <div className="settings-header">
-
-            <h2>
-              AI Provider
-            </h2>
-
-            <button
-              onClick={() =>
-                setShowSettings(false)
-              }
-              className="close-button"
-            >
-              ×
-            </button>
-
-          </div>
-
-          <label>
-            Provider
-          </label>
-
-          <select
-            value={provider}
-            onChange={changeProvider}
-          >
-            <option>
-              Groq
-            </option>
-
-            <option>
-              OpenRouter
-            </option>
-
-            <option>
-              Gemini
-            </option>
-          </select>
-
-          <label>
-            Model ID
-          </label>
-
-          <input
-            value={model}
-            onChange={(event) =>
-              setModel(event.target.value)
-            }
-            placeholder="Enter model ID"
-          />
-
-          <label>
-            API Key
-          </label>
-
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(event) =>
-              setApiKey(event.target.value)
-            }
-            placeholder="Enter API key"
-          />
-
-          <button
-            className="save-button"
-            onClick={saveConfiguration}
-          >
-            Save configuration
-          </button>
-
-          <div className="settings-note">
-            This prototype stores the provider
-            configuration locally.
-          </div>
-
-        </aside>
-
-      )}
-
-    </div>
-  );
-}
-
-export default App;
