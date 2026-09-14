@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 const DEFAULT_MODELS = {
   groq: "llama-3.3-70b-versatile",
@@ -6,787 +6,813 @@ const DEFAULT_MODELS = {
   gemini: "gemini-2.0-flash",
 };
 
-const CONNECTOR_INFO = {
-  GitHub: {
-    description: "Repositories, files, commits and code",
-    icon: "◉",
+const PROVIDERS = {
+  groq: {
+    name: "Groq",
+    url: "https://api.groq.com/openai/v1/chat/completions",
   },
-  Supabase: {
-    description: "Database, authentication and backend services",
-    icon: "◆",
+  openrouter: {
+    name: "OpenRouter",
+    url: "https://openrouter.ai/api/v1/chat/completions",
   },
-  Airtable: {
-    description: "Tables, records and structured data",
-    icon: "▦",
-  },
-  Dropbox: {
-    description: "Files and folders",
-    icon: "□",
-  },
-  Vercel: {
-    description: "Deployments, projects and hosting",
-    icon: "▲",
+  gemini: {
+    name: "Google Gemini",
+    url: "https://generativelanguage.googleapis.com/v1beta/models",
   },
 };
 
+const SYSTEM_PROMPT = `
+You are Kodevo, an AI software engineering and application building assistant.
+
+Your job is to help the user build complete software projects.
+
+When the user asks you to BUILD, CREATE, or MODIFY an application:
+
+1. Understand the requirements.
+2. Decide what files are needed.
+3. Generate complete working code.
+4. Never give incomplete placeholder code unless the user specifically asks for it.
+5. Keep dependencies minimal.
+6. Make the application functional.
+
+IMPORTANT FILE FORMAT:
+
+For every file you create or modify, use exactly this format:
+
+FILE: filename.ext
+\`\`\`language
+complete file contents
+\`\`\`
+
+Example:
+
+FILE: index.html
+\`\`\`html
+<!DOCTYPE html>
+<html>
+...
+</html>
+\`\`\`
+
+You may create multiple files.
+
+Do not put explanations inside the code blocks.
+
+For normal questions that do not require building files, answer normally.
+
+When modifying an existing project, preserve useful existing functionality unless the user asks you to remove it.
+`;
+
 const INITIAL_PROJECT = {
-  name: "",
+  name: "Kodevo Project",
   purpose: "",
-  targetUsers: "",
-  platform: "web",
-  design: {
-    theme: "",
-    colors: [],
-    style: "",
-    layout: "",
-    references: [],
-  },
-  features: [],
-  pages: [],
-  technical: {
-    framework: "",
-    database: "",
-    authentication: "",
-    payments: "",
-  },
-  integrations: [],
-  requirements: [],
-  decisions: [],
+  platform: "Web",
   files: [],
 };
 
 function loadJSON(key, fallback) {
   try {
     const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) : fallback;
+
+    if (!value) {
+      return fallback;
+    }
+
+    return JSON.parse(value);
   } catch {
     return fallback;
   }
 }
 
-function App() {
+function extractFiles(text) {
+  const files = [];
+
+  const regex =
+    /FILE:\s*([^\n]+)\n```[^\n]*\n([\s\S]*?)```/gi;
+
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    const name = match[1].trim();
+    const content = match[2];
+
+    if (!files.some((file) => file.name === name)) {
+      files.push({
+        name,
+        content,
+        language: name.includes(".")
+          ? name.split(".").pop()
+          : "",
+      });
+    }
+  }
+
+  return files;
+}
+
+function getFileIcon(name) {
+  const extension = name.split(".").pop().toLowerCase();
+
+  if (extension === "html") return "HTML";
+  if (extension === "css") return "CSS";
+  if (extension === "js") return "JS";
+  if (extension === "jsx") return "JSX";
+  if (extension === "ts") return "TS";
+  if (extension === "tsx") return "TSX";
+  if (extension === "json") return "{}";
+  if (extension === "md") return "MD";
+  if (extension === "py") return "PY";
+
+  return "FILE";
+}
+
+async function callAI(messages, provider, model, apiKey) {
+  if (!apiKey) {
+    throw new Error(
+      "No API key found. Open Settings and enter your API key."
+    );
+  }
+
+  const finalMessages = [
+    {
+      role: "system",
+      content: SYSTEM_PROMPT,
+    },
+    ...messages,
+  ];
+
+  if (provider === "gemini") {
+    const url =
+      `${PROVIDERS.gemini.url}/${model}:generateContent?key=${apiKey}`;
+
+    const contents = finalMessages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({
+        role: message.role === "assistant" ? "model" : "user",
+        parts: [
+          {
+            text: message.content,
+          },
+        ],
+      }));
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [
+            {
+              text: SYSTEM_PROMPT,
+            },
+          ],
+        },
+        contents,
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 8192,
+        },
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data?.error?.message ||
+          `Gemini request failed (${response.status})`
+      );
+    }
+
+    const text =
+      data?.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text || "")
+        .join("") || "";
+
+    if (!text.trim()) {
+      throw new Error("Gemini returned an empty response.");
+    }
+
+    return text;
+  }
+
+  const response = await fetch(PROVIDERS[provider].url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: finalMessages,
+      temperature: 0.2,
+      max_tokens: 8192,
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message ||
+        `AI request failed (${response.status})`
+    );
+  }
+
+  const text =
+    data?.choices?.[0]?.message?.content || "";
+
+  if (!text.trim()) {
+    throw new Error("AI returned an empty response.");
+  }
+
+  return text;
+}
+
+export default function App() {
   const [provider, setProvider] = useState(
-    () => localStorage.getItem("kodevo-provider") || "groq"
+    () =>
+      localStorage.getItem("kodevo_provider") ||
+      "groq"
   );
 
   const [model, setModel] = useState(
     () =>
-      localStorage.getItem("kodevo-model") ||
-      DEFAULT_MODELS[localStorage.getItem("kodevo-provider") || "groq"]
+      localStorage.getItem("kodevo_model") ||
+      DEFAULT_MODELS.groq
   );
 
   const [apiKey, setApiKey] = useState(
-    () => localStorage.getItem("kodevo-api-key") || ""
+    () =>
+      localStorage.getItem("kodevo_api_key") || ""
   );
 
   const [messages, setMessages] = useState(() =>
-    loadJSON("kodevo-messages", [])
+    loadJSON("kodevo_messages", [])
+  );
+
+  const [project, setProject] = useState(() =>
+    loadJSON("kodevo_project", INITIAL_PROJECT)
   );
 
   const [input, setInput] = useState("");
+
   const [loading, setLoading] = useState(false);
 
-  const [project, setProject] = useState(() =>
-    loadJSON("kodevo-project", INITIAL_PROJECT)
-  );
+  const [activeTab, setActiveTab] = useState("chat");
+
+  const [selectedFile, setSelectedFile] = useState(null);
 
   const [showSettings, setShowSettings] = useState(false);
-  const [showConnectors, setShowConnectors] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [fileTab, setFileTab] = useState("preview");
 
-  const [connectors, setConnectors] = useState(() =>
-    loadJSON("kodevo-connectors", {
-      GitHub: false,
-      Supabase: false,
-      Airtable: false,
-      Dropbox: false,
-      Vercel: false,
-    })
-  );
-
-  const models = useMemo(() => DEFAULT_MODELS, []);
+  const [showFiles, setShowFiles] = useState(true);
 
   useEffect(() => {
-    localStorage.setItem("kodevo-provider", provider);
+    localStorage.setItem("kodevo_provider", provider);
   }, [provider]);
 
   useEffect(() => {
-    localStorage.setItem("kodevo-model", model);
+    localStorage.setItem("kodevo_model", model);
   }, [model]);
 
   useEffect(() => {
-    localStorage.setItem("kodevo-api-key", apiKey);
+    localStorage.setItem("kodevo_api_key", apiKey);
   }, [apiKey]);
 
   useEffect(() => {
-    localStorage.setItem("kodevo-messages", JSON.stringify(messages));
+    localStorage.setItem(
+      "kodevo_messages",
+      JSON.stringify(messages)
+    );
   }, [messages]);
 
   useEffect(() => {
-    localStorage.setItem("kodevo-project", JSON.stringify(project));
+    localStorage.setItem(
+      "kodevo_project",
+      JSON.stringify(project)
+    );
   }, [project]);
-
-  useEffect(() => {
-    localStorage.setItem("kodevo-connectors", JSON.stringify(connectors));
-  }, [connectors]);
 
   function changeProvider(value) {
     setProvider(value);
     setModel(DEFAULT_MODELS[value]);
   }
 
-  function saveConfig() {
-    localStorage.setItem("kodevo-provider", provider);
-    localStorage.setItem("kodevo-model", model);
-    localStorage.setItem("kodevo-api-key", apiKey);
-    setShowSettings(false);
+  function updateProjectFiles(newFiles) {
+    setProject((current) => ({
+      ...current,
+      files: newFiles,
+    }));
   }
 
-  function newProject() {
-    setMessages([]);
-    setProject(INITIAL_PROJECT);
-    setSelectedFile(null);
-    localStorage.removeItem("kodevo-messages");
-    localStorage.removeItem("kodevo-project");
-  }
+  async function sendMessage(event) {
+    event?.preventDefault();
 
-  function saveConnectors(next) {
-    setConnectors(next);
-    localStorage.setItem("kodevo-connectors", JSON.stringify(next));
-  }
-
-  function toggleConnector(name) {
-    const next = {
-      ...connectors,
-      [name]: !connectors[name],
-    };
-
-    saveConnectors(next);
-  }
-
-  function detectMode(text) {
-    const value = text.toLowerCase();
-
-    if (
-      value.includes("build") ||
-      value.includes("create") ||
-      value.includes("make") ||
-      value.includes("develop")
-    ) {
-      return "build";
-    }
-
-    if (
-      value.includes("fix") ||
-      value.includes("bug") ||
-      value.includes("error") ||
-      value.includes("broken")
-    ) {
-      return "debug";
-    }
-
-    return "understand";
-  }
-
-  function extractFiles(text) {
-    const files = [];
-    const regex =
-      /(?:^|\n)\s*(?:file\s*)?([a-zA-Z0-9_./-]+\.(?:html|css|js|jsx|ts|tsx|json|py|java|cpp|c|cs|go|rs|php|rb|swift|kt|sql|md|yml|yaml|xml|sh|bash|vue|svelte))\b/g;
-
-    let match;
-
-    while ((match = regex.exec(text)) !== null) {
-      if (!files.includes(match[1])) {
-        files.push(match[1]);
-      }
-    }
-
-    return files;
-  }
-
-  async function callAI(conversation) {
-    if (!apiKey.trim()) {
-      throw new Error("Add your API key in Settings first.");
-    }
-
-    const systemPrompt = `
-You are Kodevo, an advanced AI software engineering agent.
-
-Your job is to understand the user's software project before writing code.
-
-You can work with ANY programming language or file type.
-
-Do not assume the project is HTML-only.
-
-When the user's request is incomplete, ask useful questions before coding.
-Ask only the questions that are actually necessary.
-
-Once enough information is known:
-1. Summarize your understanding.
-2. Create a clear implementation plan.
-3. Explain what you will build.
-4. Then generate the required files.
-
-During implementation, communicate progress naturally.
-
-When generating files, clearly label them using:
-FILE: filename.ext
-
-Then provide the complete file contents.
-
-Think like a senior software engineer and product designer.
-`;
-
-    const messagesForAI = [
-      {
-        role: "system",
-        content: systemPrompt,
-      },
-      ...conversation.map((message) => ({
-        role: message.role,
-        content: message.content,
-      })),
-    ];
-
-    let response;
-
-    if (provider === "gemini") {
-      response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
-          apiKey
-        )}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            contents: messagesForAI
-              .filter((m) => m.role !== "system")
-              .map((m) => ({
-                role: m.role === "assistant" ? "model" : "user",
-                parts: [{ text: m.content }],
-              })),
-            systemInstruction: {
-              parts: [{ text: systemPrompt }],
-            },
-          }),
-        }
-      );
-    } else {
-      const endpoint =
-        provider === "groq"
-          ? "https://api.groq.com/openai/v1/chat/completions"
-          : "https://openrouter.ai/api/v1/chat/completions";
-
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: messagesForAI,
-          temperature: 0.4,
-        }),
-      });
-    }
-
-  async function sendMessage() {
     const text = input.trim();
 
-    if (!text || loading) return;
+    if (!text || loading) {
+      return;
+    }
+
+    if (!apiKey.trim()) {
+      setShowSettings(true);
+      return;
+    }
 
     const userMessage = {
       role: "user",
       content: text,
     };
 
-    const nextMessages = [...messages, userMessage];
+    const nextMessages = [
+      ...messages,
+      userMessage,
+    ];
 
     setMessages(nextMessages);
     setInput("");
     setLoading(true);
 
     try {
-      const response = await callAI(nextMessages);
+      const response = await callAI(
+        nextMessages,
+        provider,
+        model,
+        apiKey
+      );
 
-      const files = extractFiles(response);
+      const generatedFiles = extractFiles(response);
 
-      if (files.length > 0) {
-        setProject((current) => ({
-          ...current,
-          files: [
-            ...current.files,
-            ...files
-              .filter(
-                (file) =>
-                  !current.files.some(
-                    (existing) =>
-                      typeof existing === "string"
-                        ? existing === file
-                        : existing.name === file
-                  )
-              )
-              .map((file) => ({
-                name: file,
-                content: "",
-                language: file.split(".").pop(),
-              })),
-          ],
-        }));
+      if (generatedFiles.length > 0) {
+        const currentFiles = project.files || [];
+
+        const updatedFiles = [...currentFiles];
+
+        for (const generatedFile of generatedFiles) {
+          const existingIndex = updatedFiles.findIndex(
+            (file) => file.name === generatedFile.name
+          );
+
+          if (existingIndex >= 0) {
+            updatedFiles[existingIndex] = generatedFile;
+          } else {
+            updatedFiles.push(generatedFile);
+          }
+        }
+
+        updateProjectFiles(updatedFiles);
+
+        setSelectedFile(generatedFiles[0].name);
       }
 
+      const assistantMessage = {
+        role: "assistant",
+        content: response,
+      };
+
       setMessages((current) => [
         ...current,
-        {
-          role: "assistant",
-          content: response,
-        },
+        assistantMessage,
       ]);
     } catch (error) {
+      const errorMessage = {
+        role: "assistant",
+        content:
+          `Error: ${error.message || "Something went wrong."}`,
+      };
+
       setMessages((current) => [
         ...current,
-        {
-          role: "assistant",
-          content: `Error: ${error.message}`,
-        },
+        errorMessage,
       ]);
     } finally {
       setLoading(false);
     }
   }
 
-  function handleKeyDown(event) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      sendMessage();
-    }
+  function clearChat() {
+    setMessages([]);
+    localStorage.removeItem("kodevo_messages");
   }
 
-  function getFileName(file) {
-    return typeof file === "string" ? file : file.name;
+  function clearProject() {
+    const freshProject = {
+      ...INITIAL_PROJECT,
+      name: "Kodevo Project",
+    };
+
+    setProject(freshProject);
+    setSelectedFile(null);
   }
 
-  function getFileContent(file) {
-    return typeof file === "string" ? "" : file.content || "";
-  }
+  const selectedFileData =
+    project.files?.find(
+      (file) => file.name === selectedFile
+    ) || null;
 
-  function isHTMLFile(file) {
-    const name = getFileName(file).toLowerCase();
-    return name.endsWith(".html") || name.endsWith(".htm");
-  }
-
-  function openFile(file) {
-    setSelectedFile(file);
-    setFileTab(isHTMLFile(file) ? "preview" : "code");
-  }
-
-  function updateProjectField(field, value) {
-    setProject((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  }
-
-  if (showConnectors) {
-    return (
-      <div className="kodevo-fullscreen">
-        <div className="kodevo-fullscreen-header">
-          <button
-            className="icon-button"
-            onClick={() => setShowConnectors(false)}
-          >
-            ←
-          </button>
+  return (
+    <div style={styles.app}>
+      <header style={styles.header}>
+        <div style={styles.logoArea}>
+          <div style={styles.logo}>K</div>
 
           <div>
-            <h1>Connectors</h1>
-            <p>Connect Kodevo to the services your projects use.</p>
+            <div style={styles.logoText}>Kodevo</div>
+            <div style={styles.logoSub}>
+              AI Software Engineer
+            </div>
           </div>
         </div>
 
-        <div className="connector-grid">
-          {Object.entries(CONNECTOR_INFO).map(([name, info]) => (
-            <div className="connector-card" key={name}>
-              <div className="connector-icon">{info.icon}</div>
-
-              <div className="connector-main">
-                <h3>{name}</h3>
-                <p>{info.description}</p>
-              </div>
-
-              <button
-                className={
-                  connectors[name]
-                    ? "connector-button connected"
-                    : "connector-button"
-                }
-                onClick={() => toggleConnector(name)}
-              >
-                {connectors[name] ? "Connected" : "Connect"}
-              </button>
-            </div>
-          ))}
-        </div>
-
-        <div className="connector-note">
-          <strong>Connector system</strong>
-          <p>
-            These controls currently store connection state locally. Real
-            authorization and API operations will be handled by Kodevo's
-            secure backend/tool layer.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (selectedFile) {
-    const fileName = getFileName(selectedFile);
-    const fileContent = getFileContent(selectedFile);
-
-    return (
-      <div className="kodevo-fullscreen file-viewer">
-        <div className="kodevo-fullscreen-header">
+        <div style={styles.headerRight}>
           <button
-            className="icon-button"
-            onClick={() => setSelectedFile(null)}
+            style={styles.headerButton}
+            onClick={() => setShowSettings(true)}
           >
-            ←
+            Settings
           </button>
 
-          <div className="file-viewer-title">
-            <div className="file-type-icon">
-              {fileName.split(".").pop()?.toUpperCase()}
-            </div>
-
-            <div>
-              <h1>{fileName}</h1>
-              <p>Project file</p>
-            </div>
-          </div>
+          <button
+            style={styles.headerButton}
+            onClick={clearChat}
+          >
+            Clear Chat
+          </button>
         </div>
+      </header>
 
-        {isHTMLFile(selectedFile) && (
-          <div className="file-tabs">
+      <div style={styles.body}>
+        <aside
+          style={{
+            ...styles.sidebar,
+            width: showFiles ? 250 : 0,
+            padding: showFiles ? 16 : 0,
+            overflow: "hidden",
+          }}
+        >
+          <div style={styles.sidebarTitle}>
+            PROJECT
+          </div>
+
+          <div style={styles.projectName}>
+            {project.name}
+          </div>
+
+          <div style={styles.fileList}>
+            {project.files?.length === 0 && (
+              <div style={styles.emptyFiles}>
+                No files yet.
+                <br />
+                Ask Kodevo to build something.
+              </div>
+            )}
+
+            {project.files?.map((file) => (
+              <button
+                key={file.name}
+                onClick={() => {
+                  setSelectedFile(file.name);
+                  setActiveTab("files");
+                }}
+                style={{
+                  ...styles.fileButton,
+                  ...(selectedFile === file.name
+                    ? styles.fileButtonActive
+                    : {}),
+                }}
+              >
+                <span style={styles.fileIcon}>
+                  {getFileIcon(file.name)}
+                </span>
+
+                <span style={styles.fileName}>
+                  {file.name}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <button
+            style={styles.newProjectButton}
+            onClick={clearProject}
+          >
+            + New Project
+          </button>
+        </aside>
+
+        <main style={styles.main}>
+          <div style={styles.tabs}>
             <button
-              className={fileTab === "preview" ? "active" : ""}
-              onClick={() => setFileTab("preview")}
+              style={{
+                ...styles.tab,
+                ...(activeTab === "chat"
+                  ? styles.tabActive
+                  : {}),
+              }}
+              onClick={() => setActiveTab("chat")}
+            >
+              Chat
+            </button>
+
+            <button
+              style={{
+                ...styles.tab,
+                ...(activeTab === "files"
+                  ? styles.tabActive
+                  : {}),
+              }}
+              onClick={() => setActiveTab("files")}
+            >
+              Files
+            </button>
+
+            <button
+              style={{
+                ...styles.tab,
+                ...(activeTab === "preview"
+                  ? styles.tabActive
+                  : {}),
+              }}
+              onClick={() => setActiveTab("preview")}
             >
               Preview
             </button>
 
             <button
-              className={fileTab === "code" ? "active" : ""}
-              onClick={() => setFileTab("code")}
+              style={styles.sidebarToggle}
+              onClick={() => setShowFiles((value) => !value)}
             >
-              Code
+              {showFiles ? "Hide Files" : "Show Files"}
             </button>
           </div>
-        )}
 
-        <div className="file-viewer-body">
-          {fileTab === "preview" && isHTMLFile(selectedFile) ? (
-            <iframe
-              title={fileName}
-              className="html-preview"
-              srcDoc={fileContent}
-            />
-          ) : (
-            <pre className="code-viewer">
-              <code>{fileContent || "// File content will appear here."}</code>
-            </pre>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="kodevo-app">
-      <aside className="kodevo-sidebar">
-        <div className="kodevo-brand">
-          <div className="kodevo-logo">K</div>
-          <span>Kodevo</span>
-        </div>
-
-        <div className="sidebar-actions">
-          <button
-            className="sidebar-button connector-sidebar-button"
-            onClick={() => setShowConnectors(true)}
-          >
-            <span>⌕</span>
-            <span>Connector</span>
-          </button>
-
-          <button className="sidebar-button" onClick={newProject}>
-            <span>＋</span>
-            <span>New project</span>
-          </button>
-        </div>
-
-        <div className="sidebar-section">
-          <div className="sidebar-label">PROJECT</div>
-
-          {project.name ? (
-            <div className="sidebar-project">
-              <div className="project-dot" />
-              <span>{project.name}</span>
-            </div>
-          ) : (
-            <div className="sidebar-empty">No project yet</div>
-          )}
-        </div>
-
-        <div className="sidebar-section">
-          <div className="sidebar-label">FILES</div>
-
-          {project.files.length === 0 ? (
-            <div className="sidebar-empty">Files appear while building</div>
-          ) : (
-            <div className="sidebar-files">
-              {project.files.map((file, index) => (
-                <button
-                  className="sidebar-file"
-                  key={`${getFileName(file)}-${index}`}
-                  onClick={() => openFile(file)}
-                >
-                  <span>◇</span>
-                  <span>{getFileName(file)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="sidebar-bottom">
-          <button
-            className="sidebar-button"
-            onClick={() => setShowSettings(true)}
-          >
-            <span>⚙</span>
-            <span>Settings</span>
-          </button>
-        </div>
-      </aside>
-
-      <main className="kodevo-main">
-        <header className="kodevo-topbar">
-          <div className="topbar-project">
-            {project.name || "New project"}
-          </div>
-
-          <div className="topbar-actions">
-            <button
-              className="topbar-button"
-              onClick={() => setShowSettings(true)}
-            >
-              Settings
-            </button>
-          </div>
-        </header>
-
-        <section className="kodevo-workspace">
-          {messages.length === 0 ? (
-            <div className="kodevo-welcome">
-              <div className="welcome-mark">K</div>
-
-              <h1>What are you building?</h1>
-
-              <p>
-                Describe your idea. Kodevo will understand the requirements,
-                ask the important questions, create a plan, and build it.
-              </p>
-
-              <div className="example-prompts">
-                <button
-                  onClick={() =>
-                    setInput(
-                      "I need a website for my business where customers can browse products and buy them."
-                    )
-                  }
-                >
-                  Build a business website
-                </button>
-
-                <button
-                  onClick={() =>
-                    setInput(
-                      "Build me a full-stack application with authentication and a database."
-                    )
-                  }
-                >
-                  Build a full-stack app
-                </button>
-
-                <button
-                  onClick={() =>
-                    setInput(
-                      "I want to create a mobile application. Help me plan it first."
-                    )
-                  }
-                >
-                  Plan a mobile app
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="kodevo-conversation">
-              {messages.map((message, index) => (
-                <div
-                  className={
-                    message.role === "user"
-                      ? "message-row user-message"
-                      : "message-row assistant-message"
-                  }
-                  key={`${message.role}-${index}`}
-                >
-                  <div className="message-avatar">
-                    {message.role === "user" ? "U" : "K"}
-                  </div>
-
-                  <div className="message-content">
-                    <div className="message-role">
-                      {message.role === "user" ? "You" : "Kodevo"}
+          {activeTab === "chat" && (
+            <div style={styles.chatArea}>
+              <div style={styles.messages}>
+                {messages.length === 0 && (
+                  <div style={styles.welcome}>
+                    <div style={styles.welcomeLogo}>
+                      K
                     </div>
 
-                    <div className="message-text">
+                    <h1 style={styles.welcomeTitle}>
+                      What do you want to build?
+                    </h1>
+
+                    <p style={styles.welcomeText}>
+                      Describe an application, website,
+                      feature, or coding problem.
+                    </p>
+
+                    <div style={styles.examples}>
+                      <button
+                        onClick={() =>
+                          setInput(
+                            "Build a modern todo application with HTML, CSS and JavaScript."
+                          )
+                        }
+                        style={styles.example}
+                      >
+                        Build a todo app
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          setInput(
+                            "Build a landing page for an AI startup."
+                          )
+                        }
+                        style={styles.example}
+                      >
+                        Build a landing page
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          setInput(
+                            "Create a responsive dashboard UI."
+                          )
+                        }
+                        style={styles.example}
+                      >
+                        Create a dashboard
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {messages.map((message, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      ...styles.message,
+                      ...(message.role === "user"
+                        ? styles.userMessage
+                        : styles.assistantMessage),
+                    }}
+                  >
+                    <div style={styles.messageRole}>
+                      {message.role === "user"
+                        ? "You"
+                        : "Kodevo"}
+                    </div>
+
+                    <pre style={styles.messageContent}>
                       {message.content}
+                    </pre>
+                  </div>
+                ))}
+
+                {loading && (
+                  <div
+                    style={{
+                      ...styles.message,
+                      ...styles.assistantMessage,
+                    }}
+                  >
+                    <div style={styles.messageRole}>
+                      Kodevo
+                    </div>
+
+                    <div style={styles.loading}>
+                      Kodevo is working...
                     </div>
                   </div>
-                </div>
-              ))}
+                )}
+              </div>
 
-              {loading && (
-                <div className="message-row assistant-message">
-                  <div className="message-avatar">K</div>
+              <form
+                onSubmit={sendMessage}
+                style={styles.inputArea}
+              >
+                <textarea
+                  value={input}
+                  onChange={(event) =>
+                    setInput(event.target.value)
+                  }
+                  placeholder="Describe what you want Kodevo to build..."
+                  style={styles.textarea}
+                  rows={3}
+                  disabled={loading}
+                />
 
-                  <div className="message-content">
-                    <div className="message-role">Kodevo</div>
-
-                    <div className="thinking-indicator">
-                      <span />
-                      <span />
-                      <span />
-                      <em>Thinking...</em>
-                    </div>
+                <div style={styles.inputBottom}>
+                  <div style={styles.providerLabel}>
+                    {PROVIDERS[provider].name} · {model}
                   </div>
+
+                  <button
+                    type="submit"
+                    style={styles.sendButton}
+                    disabled={loading || !input.trim()}
+                  >
+                    {loading ? "Working..." : "Send"}
+                  </button>
                 </div>
+              </form>
+            </div>
+          )}
+
+          {activeTab === "files" && (
+            <div style={styles.fileViewer}>
+              {!selectedFileData ? (
+                <div style={styles.emptyViewer}>
+                  Select a file from the sidebar.
+                </div>
+              ) : (
+                <>
+                  <div style={styles.viewerHeader}>
+                    <span>
+                      {getFileIcon(selectedFileData.name)}
+                    </span>
+
+                    <span>
+                      {selectedFileData.name}
+                    </span>
+                  </div>
+
+                  <pre style={styles.codeViewer}>
+                    {selectedFileData.content}
+                  </pre>
+                </>
               )}
+            </div>
+          )}
 
-              {project.files.length > 0 && (
-                <div className="generated-files">
-                  <div className="generated-files-title">
-                    Project files
-                  </div>
-
-                  {project.files.map((file, index) => (
-                    <button
-                      className="file-card"
-                      key={`${getFileName(file)}-${index}`}
-                      onClick={() => openFile(file)}
-                    >
-                      <div className="file-card-icon">
-                        {getFileName(file)
-                          .split(".")
-                          .pop()
-                          ?.toUpperCase()}
-                      </div>
-
-                      <div className="file-card-info">
-                        <strong>{getFileName(file)}</strong>
-                        <span>Open file</span>
-                      </div>
-
-                      <div className="file-card-arrow">→</div>
-                    </button>
-                  ))}
+          {activeTab === "preview" && (
+            <div style={styles.previewArea}>
+              {selectedFileData &&
+              selectedFileData.name
+                .toLowerCase()
+                .endsWith(".html") ? (
+                <iframe
+                  title="Kodevo Preview"
+                  srcDoc={selectedFileData.content}
+                  style={styles.previewFrame}
+                  sandbox="allow-scripts"
+                />
+              ) : (
+                <div style={styles.emptyViewer}>
+                  Select an HTML file to preview it.
                 </div>
               )}
             </div>
           )}
-        </section>
-
-        <div className="kodevo-composer-wrap">
-          <div className="kodevo-composer">
-            <textarea
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Tell Kodevo what you want to build..."
-              rows={1}
-              disabled={loading}
-            />
-
-            <div className="composer-bottom">
-              <div className="composer-info">
-                <span>{provider}</span>
-                <span>•</span>
-                <span>{model}</span>
-              </div>
-
-              <button
-                className="send-button"
-                onClick={sendMessage}
-                disabled={!input.trim() || loading}
-              >
-                ↑
-              </button>
-            </div>
-          </div>
-        </div>
-      </main>
+        </main>
+      </div>
 
       {showSettings && (
-        <div className="settings-overlay">
-          <div className="settings-panel">
-            <div className="settings-header">
-              <div>
-                <h2>Settings</h2>
-                <p>Configure the AI provider used by Kodevo.</p>
-              </div>
+        <div
+          style={styles.overlay}
+          onClick={() => setShowSettings(false)}
+        >
+          <div
+            style={styles.modal}
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+            <div style={styles.modalHeader}>
+              <h2 style={styles.modalTitle}>
+                Kodevo Settings
+              </h2>
 
               <button
-                className="icon-button"
-                onClick={() => setShowSettings(false)}
+                style={styles.closeButton}
+                onClick={() =>
+                  setShowSettings(false)
+                }
               >
                 ×
               </button>
             </div>
 
-            <label>Provider</label>
+            <label style={styles.label}>
+              AI Provider
+            </label>
 
             <select
               value={provider}
-              onChange={(event) => changeProvider(event.target.value)}
+              onChange={(event) =>
+                changeProvider(event.target.value)
+              }
+              style={styles.input}
             >
-              <option value="groq">Groq</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="gemini">Google Gemini</option>
+              <option value="groq">
+                Groq
+              </option>
+
+              <option value="openrouter">
+                OpenRouter
+              </option>
+
+              <option value="gemini">
+                Google Gemini
+              </option>
             </select>
 
-            <label>Model</label>
+            <label style={styles.label}>
+              Model
+            </label>
 
             <input
               value={model}
-              onChange={(event) => setModel(event.target.value)}
+              onChange={(event) =>
+                setModel(event.target.value)
+              }
+              style={styles.input}
               placeholder="Model name"
             />
 
-            <label>API key</label>
+            <label style={styles.label}>
+              API Key
+            </label>
 
             <input
               type="password"
               value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder="Enter API key"
+              onChange={(event) =>
+                setApiKey(event.target.value)
+              }
+              style={styles.input}
+              placeholder="Enter your API key"
             />
 
-            <button className="save-settings" onClick={saveConfig}>
-              Save configuration
+            <div style={styles.warning}>
+              Prototype only: the API key is stored in
+              your browser's local storage. Do not use
+              this approach for a public production app.
+            </div>
+
+            <button
+              style={styles.saveButton}
+              onClick={() =>
+                setShowSettings(false)
+              }
+            >
+              Save Settings
             </button>
           </div>
         </div>
@@ -795,28 +821,462 @@ Think like a senior software engineer and product designer.
   );
 }
 
+const styles = {
+  app: {
+    minHeight: "100vh",
+    background: "#0b0d10",
+    color: "#f5f7fa",
+    fontFamily:
+      "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    display: "flex",
+    flexDirection: "column",
+  },
 
-    const data = await response.json();
+  header: {
+    height: 64,
+    borderBottom: "1px solid #20242b",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "0 18px",
+    background: "#0f1115",
+  },
 
-    if (!response.ok) {
-      throw new Error(
-        data?.error?.message ||
-          data?.error ||
-          `API request failed with status ${response.status}`
-      );
-    }
+  logoArea: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
 
-    if (provider === "gemini") {
-      return (
-        data?.candidates?.[0]?.content?.parts
-          ?.map((part) => part.text || "")
-          .join("") || "No response returned."
-      );
-    }
+  logo: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    background: "#ffffff",
+    color: "#0b0d10",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: 800,
+    fontSize: 19,
+  },
 
-    return data?.choices?.[0]?.message?.content || "No response returned.";
-  }
+  logoText: {
+    fontWeight: 750,
+    fontSize: 17,
+  },
 
+  logoSub: {
+    color: "#858c98",
+    fontSize: 11,
+  },
 
+  headerRight: {
+    display: "flex",
+    gap: 8,
+  },
 
-export default App;
+  headerButton: {
+    background: "#171a20",
+    color: "#dce1e8",
+    border: "1px solid #292e37",
+    borderRadius: 8,
+    padding: "8px 12px",
+    cursor: "pointer",
+  },
+
+  body: {
+    display: "flex",
+    flex: 1,
+    minHeight: 0,
+  },
+
+  sidebar: {
+    borderRight: "1px solid #20242b",
+    background: "#0e1014",
+    transition: "width 0.2s ease",
+    flexShrink: 0,
+  },
+
+  sidebarTitle: {
+    color: "#707784",
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+
+  projectName: {
+    fontSize: 14,
+    fontWeight: 600,
+    marginBottom: 16,
+  },
+
+  fileList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+
+  fileButton: {
+    width: "100%",
+    border: "1px solid transparent",
+    background: "transparent",
+    color: "#aeb5c0",
+    borderRadius: 7,
+    padding: "8px",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    cursor: "pointer",
+    textAlign: "left",
+  },
+
+  fileButtonActive: {
+    background: "#191d24",
+    borderColor: "#2b3039",
+    color: "#ffffff",
+  },
+
+  fileIcon: {
+    width: 34,
+    textAlign: "center",
+    fontSize: 9,
+    fontWeight: 700,
+    color: "#8f98a6",
+  },
+
+  fileName: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  emptyFiles: {
+    color: "#626a76",
+    fontSize: 12,
+    lineHeight: 1.6,
+    padding: "10px 4px",
+  },
+
+  newProjectButton: {
+    width: "100%",
+    marginTop: 20,
+    padding: 9,
+    background: "#15181d",
+    color: "#cfd4dc",
+    border: "1px solid #292e36",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+
+  main: {
+    flex: 1,
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+
+  tabs: {
+    height: 48,
+    borderBottom: "1px solid #20242b",
+    display: "flex",
+    alignItems: "center",
+    padding: "0 14px",
+    gap: 5,
+  },
+
+  tab: {
+    border: "none",
+    background: "transparent",
+    color: "#777f8c",
+    padding: "8px 12px",
+    borderRadius: 7,
+    cursor: "pointer",
+  },
+
+  tabActive: {
+    background: "#191d24",
+    color: "#ffffff",
+  },
+
+  sidebarToggle: {
+    marginLeft: "auto",
+    background: "transparent",
+    color: "#777f8c",
+    border: "none",
+    cursor: "pointer",
+  },
+
+  chatArea: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+  },
+
+  messages: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "24px max(18px, 6vw)",
+  },
+
+  welcome: {
+    maxWidth: 720,
+    margin: "80px auto",
+    textAlign: "center",
+  },
+
+  welcomeLogo: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    background: "#ffffff",
+    color: "#0b0d10",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    margin: "0 auto 20px",
+    fontWeight: 800,
+    fontSize: 28,
+  },
+
+  welcomeTitle: {
+    fontSize: 30,
+    margin: 0,
+  },
+
+  welcomeText: {
+    color: "#858d99",
+    marginTop: 10,
+  },
+
+  examples: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 25,
+  },
+
+  example: {
+    background: "#15181d",
+    border: "1px solid #292e36",
+    color: "#c9ced6",
+    padding: "9px 12px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+
+  message: {
+    maxWidth: 900,
+    margin: "0 auto 18px",
+    borderRadius: 10,
+    padding: 14,
+  },
+
+  userMessage: {
+    background: "#171a20",
+    border: "1px solid #292e36",
+  },
+
+  assistantMessage: {
+    background: "#101318",
+    border: "1px solid #20242b",
+  },
+
+  messageRole: {
+    fontWeight: 700,
+    fontSize: 12,
+    color: "#8d95a1",
+    marginBottom: 8,
+  },
+
+  messageContent: {
+    margin: 0,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    fontFamily: "inherit",
+    lineHeight: 1.55,
+  },
+
+  loading: {
+    color: "#9aa2ae",
+  },
+
+  inputArea: {
+    padding: 14,
+    borderTop: "1px solid #20242b",
+    background: "#0e1014",
+  },
+
+  textarea: {
+    width: "100%",
+    boxSizing: "border-box",
+    resize: "vertical",
+    background: "#15181d",
+    border: "1px solid #303640",
+    borderRadius: 10,
+    color: "#ffffff",
+    padding: 13,
+    outline: "none",
+    fontFamily: "inherit",
+    fontSize: 14,
+  },
+
+  inputBottom: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 8,
+  },
+
+  providerLabel: {
+    color: "#666e7b",
+    fontSize: 11,
+  },
+
+  sendButton: {
+    background: "#ffffff",
+    color: "#0b0d10",
+    border: "none",
+    borderRadius: 8,
+    padding: "9px 16px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+
+  fileViewer: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+
+  viewerHeader: {
+    height: 48,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "0 16px",
+    borderBottom: "1px solid #20242b",
+    color: "#cfd5dd",
+    fontSize: 13,
+  },
+
+  codeViewer: {
+    flex: 1,
+    margin: 0,
+    padding: 20,
+    overflow: "auto",
+    fontFamily:
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: 13,
+    lineHeight: 1.6,
+    color: "#d6dbe3",
+  },
+
+  emptyViewer: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#626a76",
+  },
+
+  previewArea: {
+    flex: 1,
+    minHeight: 0,
+    background: "#ffffff",
+  },
+
+  previewFrame: {
+    width: "100%",
+    height: "100%",
+    minHeight: "calc(100vh - 112px)",
+    border: "none",
+    background: "#ffffff",
+  },
+
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.65)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 100,
+    padding: 20,
+  },
+
+  modal: {
+    width: "min(460px, 100%)",
+    background: "#111419",
+    border: "1px solid #2b3038",
+    borderRadius: 14,
+    padding: 20,
+    boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+  },
+
+  modalHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 20,
+  },
+
+  modalTitle: {
+    margin: 0,
+    fontSize: 20,
+  },
+
+  closeButton: {
+    background: "transparent",
+    color: "#9299a4",
+    border: "none",
+    fontSize: 25,
+    cursor: "pointer",
+  },
+
+  label: {
+    display: "block",
+    fontSize: 12,
+    color: "#8b939f",
+    marginBottom: 6,
+    marginTop: 14,
+  },
+
+  input: {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "#181b21",
+    border: "1px solid #303640",
+    color: "#ffffff",
+    borderRadius: 8,
+    padding: 10,
+    outline: "none",
+  },
+
+  warning: {
+    marginTop: 16,
+    padding: 10,
+    background: "#1a1813",
+    border: "1px solid #3a3224",
+    borderRadius: 8,
+    color: "#a69a83",
+    fontSize: 11,
+    lineHeight: 1.5,
+  },
+
+  saveButton: {
+    width: "100%",
+    marginTop: 18,
+    padding: 11,
+    background: "#ffffff",
+    color: "#0b0d10",
+    border: "none",
+    borderRadius: 8,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+};
