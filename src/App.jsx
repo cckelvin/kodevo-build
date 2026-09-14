@@ -795,7 +795,6 @@ Think like a senior software engineer and product designer.
   );
 }
 
-export default App;
 
     const data = await response.json();
 
@@ -817,3 +816,8 @@ export default App;
 
     return data?.choices?.[0]?.message?.content || "No response returned.";
   }
+    }
+  }
+}
+
+export default App;
