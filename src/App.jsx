@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+lookimport { useEffect, useMemo, useState } from "react";
 
 const DEFAULT_MODELS = {
   groq: "llama-3.3-70b-versatile",
@@ -816,7 +816,7 @@ Think like a senior software engineer and product designer.
 
     return data?.choices?.[0]?.message?.content || "No response returned.";
   }
-}
+
 
 
 export default App;
