@@ -474,8 +474,6 @@ completed and what you are doing next.
     saveConnectors(next);
   };
 
-Part 2
-
   if (showConnectors) {
     return (
       <div className="connector-page">
